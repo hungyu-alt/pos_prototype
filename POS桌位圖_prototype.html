@@ -1,0 +1,2594 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<!-- 從 iPad 主畫面開啟時以全螢幕顯示；網頁延伸到系統狀態列底下（black-translucent），由 .statusbar-area 自行畫狀態列底色，遮罩才能蓋住狀態列。
+     iPad 11 吋 iPadOS 26 實測：延伸後 innerHeight 為 820（正確），但 documentElement.clientHeight 為 788（少了狀態列高度），
+     fixed 元素與 100% 高度都依 788 計算，底部會被裁掉；故外層不用 fixed，並由 fit() 把 html、body 高度設為 innerHeight -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>桌位圖・拖曳換桌</title>
+<!--
+  桌位圖・拖曳換桌 prototype
+  依 reference/claude-design-source.html 逐行重建為單一獨立 HTML（純 JavaScript、無外部依賴）。
+  規格見 SPEC.md。色碼、字級等數值集中於下方 :root。
+-->
+<style>
+:root{
+  /* 字型 */
+  --font-family:-apple-system,"PingFang TC","Noto Sans TC","Helvetica Neue",sans-serif;
+
+  /* 品牌色 */
+  --c-primary:#1592A8;
+  --c-primary-dark:#0C4C5B;
+  --c-primary-tint:rgba(21,146,168,.06);
+
+  /* 中性色 */
+  --c-white:#fff;
+  --c-page-bg:#E4E4E6;
+  --c-text-strong:#111;
+  --c-text:#222;
+  --c-text-secondary:#333;
+  --c-text-tertiary:#555;
+  --c-line:#EBEBEB;
+  --c-fill:#F2F2F2;
+
+  /* 桌況狀態 */
+  /* 依 Figma 設計稿；圓點（篩選 chip、Popover 狀態）與桌位底色同色 */
+  --st-empty-bg:#fff;     --st-empty-fg:#000;   --st-empty-dot:#fff;    --st-empty-border:#4D4D4D;
+  --st-seated-bg:#ABBBDE; --st-seated-fg:#000;  --st-seated-dot:var(--st-seated-bg);
+  --st-cooking-bg:#EDC73E;--st-cooking-fg:#000; --st-cooking-dot:var(--st-cooking-bg);
+  --st-served-bg:#26A554; --st-served-fg:#fff;  --st-served-dot:var(--st-served-bg);
+  --st-leaving-bg:#34466B;--st-leaving-fg:#fff; --st-leaving-dot:var(--st-leaving-bg);
+
+  /* 桌位互動強調色（選取外圈、放開目標外圈、拖曳卡） */
+  --c-table-accent:#0092B1;
+
+  /* 待確認標籤 */
+  --c-pending-bg:#ED4660;
+  --c-pending-fg:#fff;
+
+  /* 佔桌計時：超時標籤（依 Figma「佔桌計時模式」） */
+  --c-overtime-bg:#D92D20;
+  --c-overtime-fg:#fff;
+
+  /* 座位圖顯示設定選單（依 Figma「佔桌計時模式」） */
+  --c-menu-bg:#F2F2F7;
+  --c-menu-head:var(--c-op-primary);
+  --c-menu-on-head:#fff;
+  --c-menu-row:#fff;
+  --c-menu-line:#EDEDED;
+  --c-menu-text:#000;
+  --c-menu-active:var(--c-op-primary);
+  --sh-menu:2px 4px 12px rgba(0,0,0,.25);
+
+  /* 標籤選單與標籤篩選（依 Figma「查看特定標籤桌」） */
+  --c-tag-chip-bg:var(--c-op-container);
+  --c-tag-chip-fg:var(--c-op-text);
+  /* 選中同桌況篩選 chip（R16），文字前加勾表示可複選（偏離 Figma，已討論提案） */
+  --c-tag-chip-active-bg:var(--c-chip-active-bg);
+  --bd-tag-chip-active:var(--bd-chip-active);
+  --c-tag-chip-check:var(--c-op-primary);
+  --c-tag-count-bg:var(--c-op-primary);
+  --c-tag-count-fg:#fff;
+  --sh-tag-menu:2px 4px 2px rgba(0,0,0,.25);
+  --op-tag-dim:.3;
+
+  /* 上方操作列（導覽列＋篩選列，依 Figma 設計稿） */
+  --c-op-primary:#0092B1;
+  --c-op-primary-border:#54B6CB;
+  --c-op-on-primary:#fff;
+  --c-op-badge-on-light:#000;
+  --c-nav-bg:#FBFAFD;
+  --c-op-line:#E6E6E6;
+  --c-op-container:#EBEBEB;
+  --c-op-on-container:#1A1A1A;
+  --c-op-text:#333;
+  --c-op-text-variant:#4D4D4D;
+  --fs-op-floor-tab:16px;
+  --fs-op-label:14px;
+  --fs-op-badge:10px;
+  /* 導覽列按鈕、清除條件（依 Figma Design system：Primary、Primary Outline、Text button） */
+  --fs-op-button:16px;
+  --c-op-primary-pressed:#00687E;
+  --c-op-primary-container:#E6F4F7;
+
+  /* 導覽列樓層頁籤 */
+  --c-floor-tab-active-bg:var(--c-op-text); --c-floor-tab-active-fg:#fff;
+  --c-floor-tab-bg:var(--c-op-container);   --c-floor-tab-fg:var(--c-op-on-container);
+  --c-floor-tab-border:var(--c-op-line);
+
+  /* 篩選 chip */
+  --c-chip-bg:var(--c-op-container);
+  --c-chip-active-bg:#E4F4F7;
+
+  /* 桌位圖 */
+  --c-obstacle-bg:#EFEFEF;
+  --c-obstacle-fg:#8A8A8A;
+  --c-mini-grid:#E6E6E6;
+  --c-pop-hint-bg:#E8F5F7;
+  --c-drag-hint-bg:#B0DDE7;
+  --c-drag-hint-fg:#003D4A;
+  --fs-drag-hint:16px;
+  --c-ghost-icon-back:#00687E;
+  /* 多筆訂單換桌視窗（選擇要換桌的訂單、加入有人桌、移至空桌；依 Figma） */
+  --c-mv-meta:#B2B2B2;
+  --c-mv-check:#000;
+  --c-mv-off:#000;
+  --fs-mv-order:18px;
+  --op-mv-disabled:.4;
+  /* 候位選桌模式鎖定：導覽列設定圖示不可點 */
+  --op-nav-locked:.4;
+  /* 訂單卡的訂單板圖示（依 Figma） */
+  --c-ghost-order-head:#B0DDE7;
+  --c-ghost-order-clip:#003D4A;
+  --c-ghost-order-clip-base:#005061;
+  --c-ghost-order-bullet:#0092B1;
+  --c-ghost-order-line:#54B6CB;
+  --fx-ghost-order-icon:drop-shadow(0 1px 2px rgba(0,0,0,.18));
+
+  /* Toast */
+  --c-toast-bg:#1C1C1E;
+  --c-toast-fg:#fff;
+
+  /* 合併 Alert */
+  --c-scrim:rgba(0,0,0,.32);
+
+  /* 底部頁籤列 */
+  --c-tab-active-bg:#EEF0F2;
+
+  /* 系統狀態列底下的區域（網頁延伸到狀態列底下，自行畫底色） */
+  --c-statusbar-bg:#FFFFFF;
+
+  /* 候位清單（依 Figma 設計稿） */
+  --c-wl-scrim:rgba(0,0,0,.5);
+  --c-wl-bg:var(--c-white);
+  --c-wl-text:#000;
+  --c-wl-text-variant:var(--c-op-text-variant);
+  --c-wl-action:var(--c-op-primary);
+  --c-wl-highlight:var(--c-pending-bg);
+  --c-wl-divider:var(--c-op-line);
+  --c-wl-num-bg:var(--c-op-container);
+  --c-wl-num-fg:var(--c-op-on-container);
+  --c-wl-search-bg:rgba(120,120,128,.12);
+  --c-wl-search-fg:rgba(60,60,67,.6);
+  --fs-wl-title:16px;
+  --fs-wl-name:16px;
+  --fs-wl-body:14px;
+  --fs-wl-meta:12px;
+  --fs-wl-search:17px;
+
+  /* 新增候位視窗（依 Figma 設計稿） */
+  --c-wla-bg:#F2F2F2;
+  --c-wla-card:var(--c-white);
+  --c-wla-nav-bg:rgba(255,255,255,.75);
+  --c-wla-nav-border:rgba(0,0,0,.3);
+  --c-wla-separator:rgba(84,84,86,.34);
+  --c-wla-placeholder:rgba(60,60,67,.3);
+  --c-wla-subtitle:var(--c-op-text-variant);
+  --c-wla-chip-bg:var(--c-op-container);
+  --c-wla-chip-fg:var(--c-op-on-container);
+  --c-wla-chip-active-bg:var(--c-op-primary);
+  --c-wla-chip-active-fg:var(--c-white);
+  --c-wla-tag-fg:var(--c-op-text);
+  --c-wla-stepper-bg:rgba(120,120,128,.12);
+  --c-wla-stepper-line:rgba(60,60,67,.3);
+  --c-wla-error:#D92D20;
+  --c-wla-error-bg:#FBEAE9;
+  --c-wla-on-error:var(--c-white);
+  --c-wla-required:#ED4660;
+  --fs-wla-nav-title:17px;
+  --fs-wla-body:16px;
+  --fs-wla-label:14px;
+  --fs-wla-badge:12px;
+
+  /* 搜尋會員視窗、會員卡片（依 Figma 設計稿） */
+  --c-wlm-header-bg:var(--c-op-primary);
+  --c-wlm-header-fg:var(--c-white);
+  --c-wlm-search-bg:#EFEFF0;
+  --c-wlm-search-fg:#848488;
+  --c-wlm-seg-bg:#0E8EAB;
+  --c-wlm-seg-active-bg:var(--c-white);
+  --c-wlm-seg-active-fg:#808080;
+  --c-wlm-seg-divider:#238AA3;
+  --sh-wlm-seg-active:0 3px .5px rgba(0,0,0,.04), 0 3px 4px rgba(0,0,0,.12);
+  --c-wlm-section-bg:#EDEDED;
+  --c-wlm-section-border:#A6A6A6;
+  --c-wlm-section-fg:#838387;
+  --c-wlm-row-border:#DDDDDE;
+  --c-wlm-row-sub:#8E8E93;
+  --c-member-card-bg:#F2F2F2;
+  --c-member-badge-bg:#B0DDE7;
+  --c-member-badge-fg:#003D4A;
+  --c-member-divider:#CCCCCC;
+  --c-wla-toast-bg:#1A1A1A;
+  --c-wla-toast-fg:var(--c-white);
+
+  /* 候位左滑操作按鈕、取消候位 Alert（依 Figma，iOS 原生樣式） */
+  --c-wl-swipe-edit:#AEAEB2;
+  --c-wl-swipe-qr:#FF9500;
+  --c-wl-swipe-cancel:#FF3B30;
+  --c-wl-swipe-fg:var(--c-white);
+  --w-wl-swipe-action:96px;
+  --sz-wl-swipe-icon:28px;
+  --dur-wl-swipe:.2s;
+  --dur-wl-remove:.25s;
+  --c-ios-alert-bg:rgba(242,242,242,.92);
+  --c-ios-alert-line:rgba(60,60,67,.29);
+  --c-ios-alert-action:#007AFF;
+  --c-ios-alert-destructive:#D92D20;
+  --fs-ios-alert-title:17px;
+  --fs-ios-alert-msg:13px;
+  --fs-wlm-title:17px;
+  --fs-wlm-seg:13px;
+  --fs-wlm-row:17px;
+  --fs-wlm-row-sub:13px;
+  /* 會員資料視窗（R65，依現有會員資料視窗截圖） */
+  --c-mi-toolbar-bg:#F7F7F7;
+  --c-mi-toolbar-line:#D9D9DC;
+  --c-mi-section-bg:#EFEFF4;
+  --c-mi-section-fg:#6D6D72;
+  --c-mi-value:var(--c-op-primary);
+  --c-mi-value-muted:#8E8E93;
+  --c-mi-pin:#3C3C43;
+  --c-mi-chevron:#C4C4C7;
+  --fs-mi-row:17px;
+  --fs-mi-section:13px;
+
+  /* 桌卡（點擊佔桌的桌）：表單區沿用新增候位的樣式 */
+  --c-tc-scrim:var(--c-wl-scrim);
+  --c-tc-danger:var(--c-wla-error);
+  --c-tc-value:var(--c-op-text-variant);
+  --c-tc-hint-btn:#000;
+  --fs-tc-hint-btn:14px;
+  --op-tc-note-placeholder:.38;
+  /* 桌卡的待確認訂單卡（依 Figma；品項紅字同待確認標籤） */
+  --c-tc-order-head-bg:#FF8E00;
+  --c-tc-order-head-fg:rgba(255,255,255,.7);
+  --c-tc-order-pending:var(--c-pending-bg);
+  --fs-tc-order-title:20px;
+  /* 桌卡的一般訂單卡（出餐中、已出餐）與待離桌畫面（依 Figma） */
+  --c-tc-order-paid-bg:#007AD8;
+  --c-tc-order-paid-fg:var(--c-white);
+  --c-tc-order-cust-bg:#D9D9D9;
+  --c-tc-order-item-bg:#FDEABA;
+  --c-tc-done-placeholder:#D9D9D9;
+  --fs-tc-done:14px;
+  /* 空桌桌卡（一般掃碼點餐）：進階設定開關（依 Figma iOS Toggle） */
+  --c-tc-toggle-on:var(--c-op-primary);
+  --c-tc-toggle-off:rgba(120,120,128,.16);
+  --c-tc-toggle-knob:var(--c-white);
+  --sh-tc-toggle-knob:0 3px 8px rgba(0,0,0,.15), 0 3px 1px rgba(0,0,0,.06);
+  --fs-tc-expand:14px;
+
+  /* 框線 */
+  --bd-table:2px solid transparent;
+  /* 空桌虛線：線段 2px、間隔 6px，框線畫在桌內側（依 Figma；CSS dashed 無法指定線段長度，改以 SVG 繪製；間隔由 evenDash 依一圈長度微調） */
+  --bd-table-empty-width:2px;
+  --bd-table-empty-dash:2 6;
+  /* 篩選列「空桌」圓點：白底＋2px 黑色虛線，線段 2px、間隔 2px，畫在內側（依 Figma） */
+  --bd-chip-dot-empty-color:#000;
+  --bd-chip-dot-empty-dash:2 2;
+  --bd-chip-active:1.5px solid var(--c-op-primary);
+
+  /* 陰影 */
+  --sh-popover:0 10px 36px rgba(0,0,0,.18);
+  --sh-minimap:0 4px 16px rgba(0,0,0,.14);
+  --sh-ghost:0 4px 16px rgba(0,0,0,.16);
+  --sh-toast:0 8px 24px rgba(0,0,0,.2);
+  --sh-wl-panel:0 0 20px 4px rgba(0,0,0,.12);
+  --sh-tc:0 15px 75px rgba(0,0,0,.18);
+  --sh-table-selected:0 0 0 4px var(--c-white), 0 0 0 7px var(--c-table-accent);
+  --sh-table-drop-empty:0 0 0 4px var(--c-white), 0 0 0 10px var(--c-table-accent);
+  --sh-table-drop-merge:0 0 0 4px var(--c-white), 0 0 0 8px var(--c-table-accent);
+  /* 空桌陰影用 box-shadow 而非 filter：filter 與 box-shadow 動畫並存時，Safari 會殘留外圈陰影 */
+  --sh-table-empty:0 4px 8px rgba(0,0,0,.16);
+
+  /* 字級 */
+  --fs-table-name:20px;
+  --fs-table-guests:12px;
+  --fs-table-pending:12px;
+  --fs-table-time:12px;
+  --fs-menu:18px;
+  --fs-tag-count:10px;
+
+  /* 動畫 */
+  --dur-fast:.15s;
+  --dur-base:.2s;
+  --dur-wl:.25s;
+  --dur-seat-breathe:1.6s;   /* 候位開桌選桌模式：空桌外框呼吸動態一循環 */
+  --seat-breathe-scale:1.06;  /* 呼吸時外框最大縮放（桌子本身不縮放） */
+  --dur-wla-swap:.3s;   /* 新增候位：手填欄位與會員卡片切換（收合＋淡入淡出） */
+  --dur-long-press:300ms;   /* 長按多久拿起拖曳卡（JS 也讀這個值） */
+  --dur-card-pop:.2s;
+  /* 落桌回饋（R64）：開桌、換桌、合併完成後目標桌輕彈＋光圈擴散一次（JS 讀 delay 與 total） */
+  --land-delay:.2s;         /* 等視窗關閉、淡化恢復後才開始播 */
+  --land-pop-scale:1.08;
+  --dur-land-pop:.3s;
+  --land-ring-width:3px;
+  --land-ring-scale:1.35;
+  --dur-land-ring:.6s;
+  --dur-land-static:1s;     /* 減少動態效果：靜態外框淡出 */
+
+  /* 拖曳卡位置：顯示在手指正上方，避免被手指擋住（JS 也讀這兩個值） */
+  --ghost-gap:28px;      /* 卡片底部與觸點的距離 */
+  --ghost-top-min:60px;  /* 卡片頂端最高到這裡（提示列 52px 下方留 8px），手指太靠上時卡片改為往下貼齊 */
+
+  /* 長按回饋：按下縮放 */
+  --press-scale:.90;
+}
+
+html,body{margin:0;height:100%;background:var(--c-page-bg);overflow:hidden;font-family:var(--font-family);-webkit-font-smoothing:antialiased}
+a{color:var(--c-primary)}a:hover{color:var(--c-primary-dark)}
+*{box-sizing:border-box}
+
+/* 純結構用容器，不參與版面 */
+.slot{display:contents}
+
+/* 縮放（不加 iPad 外框；關閉 iPad Safari 長按選單與點擊閃爍） */
+/* 不用 position:fixed：iPadOS 26 主畫面模式的 fixed 元素依 clientHeight（少了狀態列高度）裁切，底部會被截掉；高度由 JS 設定 */
+.stage{position:absolute;top:0;left:0;right:0;height:100%;display:flex;align-items:center;justify-content:center;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+.device{width:1180px;flex-shrink:0;transform-origin:center}
+/* 寬 1180；高度由 JS 依視窗設定（填滿視窗，介於 SCREEN_MIN_H 與 SCREEN_MAX_H 之間） */
+.screen{position:relative;width:1180px;height:820px;background:var(--c-white);overflow:hidden;display:flex;flex-direction:column}
+/* 系統狀態列底下的區域（高度＝狀態列高度，由 JS 設定；Safari 分頁模式為 0） */
+.statusbar-area{flex-shrink:0;height:0;background:var(--c-statusbar-bg)}
+
+
+/* 導覽列 */
+.navbar{height:61px;flex-shrink:0;background:var(--c-nav-bg);border-bottom:1px solid var(--c-op-line);display:flex;align-items:center;justify-content:space-between;padding:0 16px}
+.nav-left{display:flex;gap:16px;align-items:center}
+.nav-right{display:flex;gap:16px;align-items:center}
+.nav-actions{display:flex;gap:12px;align-items:center}
+.op-icon{display:block;flex-shrink:0}
+/* 分隔線在 Figma 中寬度為 0（線條置中於該位置），不占版面寬度 */
+.op-divider{margin:0 -0.5px}
+.floor-tab{padding:4px 12px;border-radius:100px;display:flex;align-items:center;font-size:var(--fs-op-floor-tab);line-height:24px;font-weight:500;white-space:nowrap;cursor:pointer}
+/* Figma 框線畫在內側，故內距扣掉 1px 框線 */
+.nav-btn{padding:7px 11px;border-radius:100px;border:1px solid;display:flex;align-items:center;justify-content:center;gap:4px;font-size:var(--fs-op-label);line-height:20px;font-weight:500;white-space:nowrap}
+.nav-btn-secondary{background:var(--c-white);border-color:var(--c-op-primary);color:var(--c-op-primary)}
+.nav-btn-primary{background:var(--c-op-primary);border-color:var(--c-op-primary-border);color:var(--c-op-on-primary)}
+.nav-btn-badge{height:20px;min-width:20px;padding:0 4px;border-radius:100px;display:flex;align-items:center;justify-content:center;font-size:var(--fs-op-badge);line-height:12px;font-weight:500}
+.nav-btn-secondary .nav-btn-badge{background:var(--c-op-primary);color:var(--c-op-on-primary)}
+.nav-btn[data-act]{cursor:pointer}
+.nav-btn-primary .nav-btn-badge{background:var(--c-white);color:var(--c-op-badge-on-light)}
+/* 導覽列「桌號未定」「候位」：16px（行高 24）、高 40；「候位」無外框（框線同底色）；按下時改 pressed 色 */
+.nav-actions .nav-btn{font-size:var(--fs-op-button);line-height:24px}
+.nav-actions .nav-btn-primary{border-color:var(--c-op-primary)}
+.nav-actions .nav-btn-secondary:active{background:var(--c-op-primary-container);border-color:var(--c-op-primary-pressed);color:var(--c-op-primary-pressed)}
+.nav-actions .nav-btn-primary:active{background:var(--c-op-primary-pressed);border-color:var(--c-op-primary-pressed)}
+
+/* 篩選列 */
+.filterbar{height:53px;flex-shrink:0;background:var(--c-white);border-bottom:1px solid var(--c-op-line);display:flex;align-items:center;justify-content:space-between;padding:0 16px}
+.filter-left{display:flex;gap:12px;align-items:center}
+.chip{padding:4px 8px;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:4px;font-size:var(--fs-op-label);line-height:20px;font-weight:500;color:var(--c-op-text);white-space:nowrap;cursor:pointer}
+.chip-dot{width:10px;height:10px;border-radius:100px}
+.chip-dot-empty{display:block;flex-shrink:0;overflow:visible;fill:var(--st-empty-dot);stroke:var(--bd-chip-dot-empty-color);stroke-width:2px;stroke-dasharray:var(--bd-chip-dot-empty-dash)}
+.dropdown{padding:4px 4px 4px 8px;border-radius:8px;background:var(--c-op-container);display:flex;align-items:center;justify-content:center;gap:4px;font-size:var(--fs-op-label);line-height:20px;font-weight:500;color:var(--c-op-on-container);white-space:nowrap}
+.dropdown-tag,.dropdown-seat{cursor:pointer}
+/* 清除條件：有桌況篩選或標籤條件時才顯示（依 Figma「快速清除所選條件」） */
+.filter-clear{padding:4px 10px;font-size:var(--fs-op-button);line-height:24px;font-weight:500;color:var(--c-op-primary);white-space:nowrap;cursor:pointer}
+.filter-clear:active{color:var(--c-op-primary-pressed)}
+/* 標籤下拉：有勾選時在文字與箭頭間顯示勾選數量 */
+.dropdown-count{height:20px;min-width:28px;padding:0 4px;border-radius:100px;background:var(--c-tag-count-bg);color:var(--c-tag-count-fg);font-size:var(--fs-tag-count);line-height:12px;font-weight:500;display:flex;align-items:center;justify-content:center}
+.filter-total{font-size:var(--fs-op-label);line-height:16px;color:var(--c-op-text-variant);white-space:nowrap}
+
+/* 桌位圖 */
+.floor{position:relative;flex:1;overflow:hidden;background:var(--c-white);touch-action:none}
+/* 可平移的畫布（以 transform 位移；Popover 放在畫布外，維持疊在小地圖之上） */
+.canvas{position:absolute;left:0;top:0;width:2360px;height:1240px;will-change:transform}
+.obstacle{position:absolute;background:var(--c-obstacle-bg);color:var(--c-obstacle-fg);font-size:13px;display:flex;align-items:center;justify-content:center}
+
+.table{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;touch-action:none;transition:transform var(--dur-fast),box-shadow var(--dur-fast),opacity var(--dur-base),background var(--dur-base)}
+/* 空桌「＋」與桌名之間無間距 */
+.table-plus{display:block;flex-shrink:0;margin-bottom:-4px}
+/* 空桌虛線框：蓋滿整張桌（含 2px 透明框線） */
+.table-dash{position:absolute;inset:-2px;overflow:visible;fill:none;stroke:var(--st-empty-border);stroke-width:var(--bd-table-empty-width);stroke-dasharray:var(--bd-table-empty-dash)}
+/* 長按桌上的圖片時，iPad Safari 會啟動系統拖放並接走觸控，造成放開手指的事件收不到；圖片一律不可拖放、不接收觸控 */
+.table img,.table svg{-webkit-user-drag:none;user-drag:none;pointer-events:none}
+.table-name{max-width:calc(100% - 8px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-table-name);line-height:24px;font-weight:600;text-align:center}
+.table-guests{display:flex;align-items:center;justify-content:center;gap:4px;font-size:var(--fs-table-guests);line-height:16px;font-weight:500}
+.table-guests-icon{display:block;flex-shrink:0}
+/* 設計稿為距桌位外緣 -4px；桌位有 2px 框線（空桌虛線、其他透明），故再減 2px */
+.table-pending{position:absolute;left:-6px;top:-6px;padding:4px 8px;border-radius:100px;background:var(--c-pending-bg);border:1.5px solid var(--c-pending-fg);color:var(--c-pending-fg);font-size:var(--fs-table-pending);line-height:16px;font-weight:500;white-space:nowrap}
+/* 佔桌計時：時間列（時鐘圖示＋時間，與人數同字級）；超時改顯示左下角紅色膠囊（依 Figma 距桌位外緣左 -12px、下 -4px，再扣 2px 框線） */
+.table-time{display:flex;align-items:center;justify-content:center;gap:4px;font-size:var(--fs-table-time);line-height:16px;font-weight:500}
+.table-time svg,.table-overtime svg{display:block;flex-shrink:0}
+.table-overtime{position:absolute;left:-14px;bottom:-6px;height:24px;padding:0 4px;border-radius:100px;background:var(--c-overtime-bg);border:1.5px solid var(--c-overtime-fg);color:var(--c-overtime-fg);font-size:var(--fs-table-time);line-height:16px;font-weight:500;white-space:nowrap;display:flex;align-items:center}
+.table-badge{position:absolute;top:-34px;left:50%;transform:translateX(-50%);white-space:nowrap;height:26px;padding:0 12px;border-radius:13px;background:var(--c-primary-dark);color:var(--c-white);font-size:13px;font-weight:600;display:flex;align-items:center}
+
+/* Popover */
+.popover{position:absolute;width:240px;background:var(--c-white);border-radius:14px;box-shadow:var(--sh-popover);padding:16px;display:flex;flex-direction:column;gap:10px;z-index:5}
+.popover-head{display:flex;align-items:center;justify-content:space-between}
+.popover-title{font-size:18px;font-weight:700;color:var(--c-text-strong)}
+.popover-status{height:22px;padding:0 8px;border-radius:11px;font-size:12px;display:flex;align-items:center;gap:5px;background:var(--c-fill);color:var(--c-text-secondary)}
+.popover-status-dot{width:8px;height:8px;border-radius:50%}
+.popover-grid{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px;color:var(--c-text-tertiary)}
+.popover-val{color:var(--c-text-strong);text-align:right}
+.popover-amount{font-weight:700}
+.popover-hint{font-size:12px;color:var(--c-primary);background:var(--c-pop-hint-bg);border-radius:8px;padding:8px 10px}
+.popover-cap{font-size:14px;color:var(--c-text-tertiary)}
+.popover-open{height:40px;border-radius:10px;background:var(--c-primary);color:var(--c-white);font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;cursor:pointer}
+
+/* 座位圖顯示設定選單：三角形尖端對準設定圖示下方，位置依 Figma（三角形頂端距導覽列頂 45px） */
+.settings-btn{cursor:pointer}
+/* 候位選桌模式鎖定（R48）：不提供「桌號未定」「候位」按鈕（保留位置，候位清單仍依「候位」按鈕定位），設定圖示不可點 */
+.screen.is-seat-lock .nav-actions{visibility:hidden}
+.screen.is-seat-lock .settings-btn{opacity:var(--op-nav-locked);pointer-events:none}
+/* 換桌選桌模式鎖定（R55）：「候位」按鈕外觀不變、點了沒反應 */
+.screen.is-swap-lock #waitlistBtn{pointer-events:none}
+.settings-menu{position:absolute;left:16px;top:calc(var(--safe-top, 0px) + 45px);width:263px;z-index:20;filter:drop-shadow(var(--sh-menu))}
+.settings-arrow{position:absolute;left:10px;top:0;width:24px;height:14px;background:var(--c-menu-head);clip-path:polygon(50% 0,100% 100%,0 100%)}
+.settings-card{margin-top:13px;border-radius:12px;overflow:hidden;background:var(--c-menu-bg);padding-bottom:16px}
+.settings-head{position:relative;height:50px;background:var(--c-menu-head);color:var(--c-menu-on-head);display:flex;align-items:center;justify-content:center;padding:0 36px;font-size:var(--fs-menu);line-height:22px;font-weight:600;white-space:nowrap}
+.settings-back{position:absolute;left:8px;top:15px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.settings-gap{height:16px}
+.settings-row{height:48px;background:var(--c-menu-row);display:flex;align-items:center;padding-left:4px;cursor:pointer}
+.settings-check{width:20px;height:20px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--c-menu-text);visibility:hidden}
+.settings-row.is-active .settings-check{visibility:visible}
+.settings-label{flex:1;align-self:stretch;margin-left:4px;display:flex;align-items:center;font-size:var(--fs-menu);line-height:22px;font-weight:500;color:var(--c-menu-text);white-space:nowrap}
+.settings-row.is-active .settings-label{color:var(--c-menu-active)}
+.settings-row:not(:last-child) .settings-label{border-bottom:1px solid var(--c-menu-line)}
+/* 第一層：無勾選欄（標題左側空 28px），右側箭頭 */
+.settings-root .settings-check{width:28px}
+.settings-root .settings-label{padding-right:4px}
+.settings-root .settings-row:not(:last-child) .settings-label{border-bottom:none}
+.settings-root .settings-label-text{flex:1;align-self:stretch;display:flex;align-items:center;border-bottom:1px solid var(--c-menu-line)}
+.settings-chevron{display:block;flex-shrink:0;margin-left:4px}
+
+/* 標籤選單：外觀同座位圖顯示設定選單；位置依「標籤」下拉計算（選單左緣＝下拉左緣 +17px、三角形尖端＝下拉左緣 +41px、三角形頂端距下拉底 6px，依 Figma） */
+.tag-menu{position:absolute;width:263px;z-index:20;filter:drop-shadow(var(--sh-tag-menu))}
+.tag-menu .settings-arrow{left:12px}
+.tag-list{background:var(--c-menu-row);padding:12px;display:flex;flex-wrap:wrap;gap:12px}
+.tag-chip{display:flex;align-items:center;gap:4px;padding:4px 8px;border-radius:8px;background:var(--c-tag-chip-bg);color:var(--c-tag-chip-fg);font-size:var(--fs-op-label);line-height:20px;font-weight:500;white-space:nowrap;cursor:pointer}
+.tag-chip.is-active{padding:2.5px 6.5px;background:var(--c-tag-chip-active-bg);border:var(--bd-tag-chip-active)}
+.tag-chip-check{width:16px;height:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--c-tag-chip-check)}
+.tag-chip-check svg{width:14px;height:auto}
+/* 座位數選單（R61）：外觀同座位圖顯示設定選單；選單左緣＝「座位數」下拉左緣 +44px、三角形頂端距下拉底 6px（依 Figma） */
+.seat-menu{position:absolute;width:263px;z-index:20;filter:drop-shadow(var(--sh-menu))}
+.seat-menu .settings-arrow{left:12px}
+/* 特殊需求標籤池（R57）：外觀同標籤選單；三角形尖端對準「加入標籤」中央、頂端距按鈕底 6px；下方空間不足時改開在按鈕上方（三角形朝下） */
+.needs-pool{position:absolute;width:263px;z-index:50;filter:drop-shadow(var(--sh-tag-menu))}
+.needs-pool .settings-arrow{left:12px}
+.needs-pool.is-up .settings-arrow{top:auto;bottom:0;background:var(--c-menu-bg);clip-path:polygon(0 0,100% 0,50% 100%)}
+.needs-pool.is-up .settings-card{margin:0 0 13px}
+
+/* 小地圖 */
+.minimap{position:absolute;right:16px;bottom:16px;width:190px;height:100px;background:var(--c-white);border-radius:10px;box-shadow:var(--sh-minimap);overflow:hidden;pointer-events:none}
+.minimap-grid-v{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--c-mini-grid)}
+.minimap-grid-h{position:absolute;top:50%;left:0;right:0;height:1px;background:var(--c-mini-grid)}
+.minimap-viewport{position:absolute;border:2px solid var(--c-primary);border-radius:7px;background:var(--c-primary-tint)}
+
+/* 拖曳中：跟手訂單卡 */
+/* 位置由 JS 以 transform 設定：translate(x, y) rotate(-4deg) */
+.ghost{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;z-index:10;will-change:transform}
+/* .ghost 的原點即觸點；卡片水平置中、底部在觸點上方 --ghost-gap，彈出動畫從觸點長出 */
+.ghost-card{position:absolute;left:-45px;bottom:var(--ghost-gap);width:90px;background:var(--c-white);border-radius:8px;box-shadow:var(--sh-ghost);padding:8px 8px 10px;display:flex;flex-direction:column;align-items:center;transform-origin:50% calc(100% + var(--ghost-gap));animation:ghost-pop var(--dur-card-pop) cubic-bezier(.34,1.56,.64,1) both}
+@keyframes ghost-pop{from{transform:scale(.6);opacity:0}}
+.ghost-name{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;line-height:20px;font-weight:500;color:var(--c-text-strong)}
+.ghost-icon{width:43px;height:43px;display:flex;align-items:center;justify-content:center}
+.ghost-order-icon{filter:var(--fx-ghost-order-icon)}
+.ghost-guests{display:flex;gap:2px;font-size:14px;line-height:20px;font-weight:500;color:var(--c-table-accent)}
+
+/* 拖曳中：頂端提示列 */
+.drag-hint{position:absolute;top:0;left:0;right:0;height:52px;background:var(--c-drag-hint-bg);color:var(--c-drag-hint-fg);font-size:var(--fs-drag-hint);line-height:24px;font-weight:500;display:flex;align-items:center;padding:0 16px;pointer-events:none;z-index:8}
+
+/* Toast */
+.toast{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);height:44px;padding:0 18px;border-radius:12px;background:var(--c-toast-bg);color:var(--c-toast-fg);font-size:14px;display:flex;align-items:center;gap:14px;box-shadow:var(--sh-toast);z-index:20}
+
+/* 底部頁籤列 */
+.tabbar{height:64px;flex-shrink:0;border-top:1px solid var(--c-line);display:flex;justify-content:center;align-items:center;gap:14px}
+.tab{width:76px;height:50px;border-radius:25px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.tab-icon{width:18px;height:18px;border:2px solid}
+.tab-label{font-size:11px}
+
+/* 合併 Alert */
+
+/* 候位清單：遮罩與面板為兄弟元素，點面板不會觸發遮罩的關閉 */
+.wl-scrim{position:absolute;inset:0;background:var(--c-wl-scrim);z-index:40;animation:wl-fade-in var(--dur-wl) ease-out both}
+/* 右緣位置由 JS 依「候位」按鈕設定；上緣距系統狀態列、下緣距底各 23px（--safe-top 由 JS 設定） */
+.wl-panel{position:absolute;top:calc(var(--safe-top, 0px) + 23px);bottom:23px;width:400px;background:var(--c-wl-bg);border-radius:12px;box-shadow:var(--sh-wl-panel);display:flex;flex-direction:column;z-index:41;animation:wl-slide-in var(--dur-wl) ease-out both}
+.wl-scrim.wl-closing{animation:wl-fade-out var(--dur-wl) ease-in both}
+.wl-panel.wl-closing{animation:wl-slide-out var(--dur-wl) ease-in both}
+@keyframes wl-fade-in{from{opacity:0}}
+@keyframes wl-fade-out{to{opacity:0}}
+@keyframes wl-slide-in{from{transform:translateX(520px)}}
+@keyframes wl-slide-out{to{transform:translateX(520px)}}
+/* 指向「候位」按鈕的三角形（Figma 為旋轉 90° 的白色多邊形）；面板下移 23px 後改放在頂端往下 4px，仍對準按鈕 */
+.wl-arrow{position:absolute;left:395px;top:4px;width:16px;height:23px;background:var(--c-wl-bg);clip-path:polygon(0 0,100% 50%,0 100%)}
+.wl-head{height:54px;flex-shrink:0;padding:8px 12px;display:flex;align-items:center;justify-content:space-between}
+/* Figma 左側關閉圖示透明度為 0，只保留位置 */
+.wl-head-spacer{width:24px;height:24px}
+.wl-title{font-size:var(--fs-wl-title);line-height:24px;font-weight:600;color:var(--c-wl-text)}
+.wl-text-btn{padding:4px 10px;font-size:var(--fs-op-button);line-height:24px;font-weight:500;color:var(--c-wl-action);white-space:nowrap;cursor:pointer}
+/* 列上的「開桌」同「清除條件」（Figma Text button）：按下時改 pressed 色 */
+.wl-item .wl-text-btn:active{color:var(--c-op-primary-pressed)}
+.wl-head .wl-text-btn{font-size:var(--fs-wl-title);line-height:24px}
+.wl-search{flex-shrink:0;padding:4px 12px 12px}
+.wl-search-field{width:370px;height:36px;padding:0 8px;border-radius:10px;background:var(--c-wl-search-bg);display:flex;align-items:center;gap:6px;color:var(--c-wl-search-fg)}
+.wl-search-icon{display:block;flex-shrink:0}
+/* 外層 .stage 關閉了文字選取，輸入框需重新開啟才能在 iPad 上輸入 */
+.wl-search-input{flex:1;min-width:0;height:22px;padding:0;border:0;outline:0;background:transparent;font-family:var(--font-family);font-size:var(--fs-wl-search);line-height:22px;letter-spacing:-.43px;color:var(--c-wl-text);-webkit-user-select:text;user-select:text}
+.wl-search-input::placeholder{color:var(--c-wl-search-fg)}
+/* 標題與搜尋固定，清單區可捲動 */
+/* 下方圓角同面板：列有白底（左滑用），捲到底時才不會露出直角；面板本身不裁切，因為三角形畫在面板外 */
+.wl-list{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;border-radius:0 0 12px 12px}
+.wl-item{padding:8px 20px 11px;display:flex;align-items:center;gap:12px}
+/* 左滑：外框固定，內容（.wl-item）往左移露出右側操作按鈕；上下滑交給清單捲動 */
+.wl-row{position:relative;overflow:hidden;border-bottom:1px solid var(--c-wl-divider);touch-action:pan-y}
+.wl-row:last-child{border-bottom:0}
+.wl-row .wl-item{position:relative;z-index:1;background:var(--c-wl-bg);transition:transform var(--dur-wl-swipe) ease-out}
+.wl-row.is-open .wl-item{transform:translateX(-288px)}
+.wl-actions{position:absolute;top:0;right:0;bottom:0;display:flex}
+.wl-action{display:flex;align-items:center;justify-content:center;width:var(--w-wl-swipe-action);color:var(--c-wl-swipe-fg);cursor:pointer}
+.wl-action svg{display:block;width:var(--sz-wl-swipe-icon);height:var(--sz-wl-swipe-icon)}
+.wl-action-edit{background:var(--c-wl-swipe-edit)}
+.wl-action-qr{background:var(--c-wl-swipe-qr)}
+.wl-action-cancel{background:var(--c-wl-swipe-cancel)}
+/* 取消後：淡出並收合，下方列往上補 */
+.wl-row.is-removing{opacity:0;transition:height var(--dur-wl-remove) ease-in-out,opacity var(--dur-wl-remove) ease-in-out}
+
+/* iOS 原生樣式 Alert（取消候位） */
+.ios-alert-scrim{position:absolute;inset:0;background:var(--c-scrim);display:flex;align-items:center;justify-content:center;z-index:46;animation:wl-fade-in var(--dur-base) ease-out both}
+.ios-alert{width:270px;border-radius:14px;background:var(--c-ios-alert-bg);-webkit-backdrop-filter:blur(40px);backdrop-filter:blur(40px);overflow:hidden;text-align:center;color:#000}
+.ios-alert-body{padding:19px 16px;display:flex;flex-direction:column;gap:2px}
+.ios-alert-title{font-size:var(--fs-ios-alert-title);line-height:22px;font-weight:600}
+.ios-alert-msg{font-size:var(--fs-ios-alert-msg);line-height:16px;white-space:pre-line}
+.ios-alert-actions{display:flex;border-top:.5px solid var(--c-ios-alert-line)}
+.ios-alert-btn{flex:1;height:44px;display:flex;align-items:center;justify-content:center;font-size:var(--fs-ios-alert-title);color:var(--c-ios-alert-action);cursor:pointer}
+.ios-alert-btn+.ios-alert-btn{border-left:.5px solid var(--c-ios-alert-line)}
+.ios-alert-btn.is-destructive{color:var(--c-ios-alert-destructive);font-weight:600}
+.wl-num{width:44px;height:44px;flex-shrink:0;border-radius:100px;background:var(--c-wl-num-bg);color:var(--c-wl-num-fg);font-size:var(--fs-wl-body);line-height:20px;font-weight:500;display:flex;align-items:center;justify-content:center}
+.wl-info{flex:1;min-width:0;display:flex;flex-direction:column;font-weight:500;color:var(--c-wl-text)}
+.wl-name-row{display:flex;align-items:center;gap:12px;font-size:var(--fs-wl-name);line-height:24px;white-space:nowrap}
+.wl-name{display:flex;align-items:center;gap:4px}
+.wl-pending{padding:4px 8px;border-radius:100px;background:var(--c-pending-bg);border:1.5px solid var(--c-pending-fg);color:var(--c-pending-fg);font-size:var(--fs-table-pending);line-height:16px}
+.wl-phone{font-size:var(--fs-wl-body);line-height:20px}
+.wl-meta{display:flex;gap:8px;font-size:var(--fs-wl-meta);line-height:16px;color:var(--c-wl-text-variant);white-space:nowrap}
+.wl-hl{color:var(--c-wl-highlight)}
+.wl-empty{padding:24px 20px;text-align:center;font-size:var(--fs-wl-body);color:var(--c-wl-text-variant)}
+
+/* 新增候位：疊在候位清單上方；遮罩點擊不關閉（只能按「取消」） */
+.wla-scrim{position:absolute;inset:0;background:var(--c-wl-scrim);z-index:42;animation:wl-fade-in var(--dur-base) ease-out both}
+/* 位置與高度由 JS 設定：狀態列以下的區域置中，最高 620px */
+.wla-panel{position:absolute;left:50%;width:540px;margin-left:-270px;border-radius:13px;background:var(--c-wla-bg);overflow:hidden;z-index:43;animation:wl-fade-in var(--dur-base) ease-out both}
+.wla-nav{position:absolute;top:0;left:0;right:0;height:44px;padding:0 16px 0 24px;display:flex;align-items:center;justify-content:space-between;background:var(--c-wla-nav-bg);-webkit-backdrop-filter:blur(25px);backdrop-filter:blur(25px);border-bottom:.33px solid var(--c-wla-nav-border);z-index:1}
+.wla-nav-btn{font-size:var(--fs-wla-body);line-height:24px;font-weight:500;color:var(--c-op-primary);cursor:pointer}
+.wla-nav-title{position:absolute;left:50%;transform:translateX(-50%);font-size:var(--fs-wla-nav-title);line-height:22px;font-weight:600;letter-spacing:-.43px;color:#000}
+/* 內容可上下滑動；頂部列半透明疊在內容上 */
+.wla-body{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:44px 0 24px;display:flex;flex-direction:column;gap:16px}
+.wla-card{background:var(--c-wla-card)}
+.wla-contact{padding:24px 0 20px;display:flex;flex-direction:column;gap:16px}
+.wla-name-row{display:flex;align-items:center;gap:32px}
+.wla-field{display:flex;padding-left:16px}
+.wla-field-name{width:216px;flex-shrink:0}
+.wla-field-inner{flex:1;min-width:0;display:flex;align-items:center;padding:11px 16px 11px 0;border-bottom:.33px solid var(--c-wla-separator)}
+.wla-field-label{width:100px;flex-shrink:0;font-size:var(--fs-wla-body);line-height:24px;font-weight:500;color:#000}
+.wla-input{flex:1;min-width:0;height:24px;padding:0;border:0;outline:0;background:transparent;font-family:var(--font-family);font-size:var(--fs-wla-body);line-height:20px;color:#000;-webkit-user-select:text;user-select:text}
+.wla-input::placeholder,.wla-note::placeholder{color:var(--c-wla-placeholder)}
+.wla-titles{display:flex;gap:20px}
+.wla-chip{height:28px;padding:0 16px;border-radius:100px;border:1px solid transparent;background:var(--c-wla-chip-bg);color:var(--c-wla-chip-fg);font-size:var(--fs-wla-label);line-height:20px;font-weight:500;display:flex;align-items:center;white-space:nowrap;cursor:pointer}
+.wla-chip.is-active{background:var(--c-wla-chip-active-bg);border-color:var(--c-wla-chip-active-bg);color:var(--c-wla-chip-active-fg)}
+.wla-link{height:48px;padding:8px 12px 8px 16px;display:flex;align-items:center;justify-content:space-between;font-size:var(--fs-wla-body);line-height:24px;font-weight:500;color:#000}
+.wla-link-icon{display:block;color:var(--c-wla-subtitle)}
+.wla-subtitle{padding:8px 20px 8px 16px;font-size:var(--fs-wla-label);line-height:20px;font-weight:500;color:var(--c-wla-subtitle)}
+.wla-guests{padding:12px 0}
+.wla-guest{padding-left:16px}
+.wla-guest.is-error{background:var(--c-wla-error-bg)}
+.wla-guest-inner{display:flex;align-items:center;justify-content:space-between;padding:11px 16px 11px 0;border-bottom:.33px solid var(--c-wla-separator)}
+.wla-guest-label{display:flex;align-items:center;gap:10px;font-size:var(--fs-wla-body);line-height:24px;font-weight:500;color:#000;white-space:nowrap}
+.wla-required{padding:4px 8px;border-radius:100px;background:var(--c-wla-required);color:var(--c-wla-on-error);font-size:var(--fs-wla-badge);line-height:16px;font-weight:500}
+.wla-error-text{font-size:var(--fs-wla-label);line-height:20px;font-weight:500;color:var(--c-wla-error)}
+.wla-guest-count{display:flex;align-items:center;gap:20px;font-size:var(--fs-wla-body);line-height:24px;font-weight:500;color:#000}
+.wla-stepper{position:relative;width:94px;height:32px;border-radius:8px;background:var(--c-wla-stepper-bg);display:flex}
+.wla-stepper::after{content:'';position:absolute;left:50%;top:7px;bottom:7px;width:1px;background:var(--c-wla-stepper-line)}
+.wla-step{flex:1;display:flex;align-items:center;justify-content:center;color:#000;cursor:pointer}
+/* 多筆訂單換桌視窗：在狀態列以下區域置中，高度依內容（最多到上下各留 20px，top、max-height 由 JS 設定），清單在卡片內捲動 */
+.mv-scrim{position:absolute;inset:0;background:var(--c-wl-scrim);z-index:44;animation:wl-fade-in var(--dur-base) ease-out both}
+.mv-panel{position:absolute;left:50%;width:540px;margin-left:-270px;transform:translateY(-50%);border-radius:13px;background:var(--c-wla-bg);box-shadow:var(--sh-tc);overflow:hidden;display:flex;flex-direction:column;z-index:45;animation:wl-fade-in var(--dur-base) ease-out both}
+.mv-nav{position:relative;flex-shrink:0;height:44px;padding:0 16px 0 24px;display:flex;align-items:center;background:var(--c-wla-nav-bg);border-bottom:.33px solid var(--c-wla-nav-border)}
+.mv-body{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:20px 0 32px;display:flex;flex-direction:column;gap:16px}
+.mv-footer{flex-shrink:0;padding:16px 20px;display:flex;flex-direction:column;gap:8px;background:var(--c-white);border-top:1px solid var(--c-op-line)}
+.mv-btns{display:flex;gap:12px}
+.mv-btns .nav-btn{flex:1;height:36px}
+.mv-btns .nav-btn.is-disabled{opacity:var(--op-mv-disabled);pointer-events:none}
+.mv-order{padding:8px 12px 0;background:var(--c-white);cursor:pointer}
+.mv-order-inner{display:flex;align-items:center;gap:8px;padding-bottom:4px;border-bottom:1px solid var(--c-op-line)}
+.mv-order:last-child .mv-order-inner{border-bottom:0}
+.mv-order-main{flex:1;min-width:0;line-height:24px;white-space:nowrap}
+.mv-check{width:20px;height:20px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--c-mv-check)}
+.mv-order-name{display:flex;align-items:center;gap:4px;font-size:var(--fs-mv-order);line-height:22px;font-weight:500;color:var(--c-op-primary)}
+.mv-order.is-off .mv-order-name{color:var(--c-mv-off)}
+.mv-order-emoji{font-size:var(--fs-wla-body)}
+.mv-order-meta{font-size:var(--fs-wla-body);font-weight:500;color:var(--c-mv-meta)}
+.mv-order-items{display:block;overflow:hidden;text-overflow:ellipsis}
+.mv-order-price{flex-shrink:0;white-space:nowrap}
+.mv-order:not(.is-off) .mv-order-price{color:var(--c-op-primary)}
+.mv-warn{padding:0 16px;font-size:var(--fs-wla-label);line-height:20px;font-weight:500;color:var(--c-wla-error)}
+.mv-member{padding:12px 16px}
+.mv-member-row{padding:8px 12px 8px 0;border-bottom:1px solid var(--c-op-line);white-space:nowrap}
+.mv-member-info{display:flex;flex-direction:column;gap:4px;padding:4px 0;font-size:var(--fs-wla-body);line-height:24px;font-weight:500;color:#000}
+.mv-member-from{color:var(--c-op-text-variant)}
+.mv-member-name{display:flex;gap:4px}
+.mv-member-swap{display:flex;align-items:center;justify-content:center;padding:16px 8px 4px 12px;font-size:var(--fs-wla-label);line-height:20px;font-weight:500;color:var(--c-op-primary);cursor:pointer}
+.mv-member-swap svg{display:block;flex-shrink:0}
+.wla-tags{padding:20px 16px}
+.wla-tag{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:8px;background:var(--c-wla-chip-bg);color:var(--c-wla-tag-fg);font-size:var(--fs-wla-label);line-height:20px;font-weight:500}
+/* 特殊需求標籤（R57）：「加入標籤」在前、已加入的標籤依加入順序在後；✕ 擴大點擊範圍但不影響外觀 */
+.wla-tags,.tc-tags{display:flex;flex-wrap:wrap;gap:12px}
+.wla-tag-add{cursor:pointer}
+.wla-tag-x{display:flex;margin:-6px -8px -6px 0;padding:6px 8px 6px 2px;cursor:pointer}
+.wla-note-wrap{height:124px;padding:20px 16px}
+/* 新增候位：套用會員後的會員卡片（取代姓名、手機與「選擇會員」） */
+.wla-member{padding:24px 16px 20px}
+.wla-member-card{display:flex;align-items:center;gap:12px;padding:14px 12px 14px 16px;border-radius:12px;background:var(--c-member-card-bg)}
+.wla-member-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;color:#000;cursor:pointer}
+/* 會員資料（R65）：疊在搜尋會員同一層，寬 500、高 550，只呈現截圖可見範圍（不捲動、不可編輯） */
+.mi-panel{position:absolute;left:50%;width:500px;margin-left:-250px;border-radius:13px;background:var(--c-white);overflow:hidden;display:flex;flex-direction:column;z-index:45;animation:wl-fade-in var(--dur-base) ease-out both}
+.mi-toolbar{flex-shrink:0;height:50px;padding:0 16px;display:flex;align-items:center;justify-content:flex-end;gap:26px;background:var(--c-mi-toolbar-bg);border-bottom:.5px solid var(--c-mi-toolbar-line);color:var(--c-op-primary)}
+.mi-toolbar svg{display:block}
+.mi-section{flex-shrink:0;height:30px;padding:0 20px;display:flex;align-items:center;background:var(--c-mi-section-bg);font-size:var(--fs-mi-section);line-height:16px;color:var(--c-mi-section-fg)}
+.mi-list{flex:1;min-height:0;overflow:hidden}
+.mi-row{padding-left:20px}
+.mi-row-inner{height:46px;padding-right:16px;display:flex;align-items:center;gap:8px;border-bottom:.5px solid var(--c-wla-separator);font-size:var(--fs-mi-row);line-height:22px;white-space:nowrap}
+.mi-label{flex:1;color:#000}
+.mi-label.is-fixed{flex:none}
+.mi-input{flex:1;min-width:0;height:22px;padding:0;border:0;outline:0;background:transparent;text-align:right;font-family:var(--font-family);font-size:var(--fs-mi-row);line-height:22px;color:var(--c-mi-value);-webkit-user-select:text;user-select:text}
+.mi-input::placeholder{color:var(--c-wla-placeholder)}
+.mi-row.is-error{background:var(--c-wla-error-bg)}
+.mi-row.is-error .mi-input,.mi-row.is-error .mi-input::placeholder{color:var(--c-wla-error)}
+.mi-err{flex-shrink:0}
+.mi-value{color:var(--c-mi-value)}
+.mi-value.is-muted{color:var(--c-mi-value-muted)}
+.mi-pin{color:var(--c-mi-pin);display:block}
+.mi-chev{color:var(--c-mi-chevron);display:block;margin-right:-6px}
+.wla-member-name{display:flex;align-items:center;gap:8px;font-size:var(--fs-wla-body);font-weight:500;white-space:nowrap}
+.wla-member-badge{padding:4px 8px;border-radius:100px;background:var(--c-member-badge-bg);color:var(--c-member-badge-fg);font-size:var(--fs-wla-badge);line-height:16px}
+.wla-member-phone{font-size:var(--fs-wla-label)}
+.wla-member-actions{display:flex;align-items:center;gap:4px}
+.wla-member-divider{width:1px;height:16px;background:var(--c-member-divider)}
+.wla-member-btn{padding:4px 10px;font-size:var(--fs-wla-body);line-height:24px;font-weight:500;color:var(--c-op-primary);cursor:pointer}
+.wla-member-btn.is-muted{color:var(--c-wla-subtitle)}
+.wla-link[data-act]{cursor:pointer}
+/* 手填欄位／會員卡片切換：以 grid 列高 1fr↔0fr 收合並淡入淡出；收合時以 -16px 抵銷與下一區塊的間距 */
+.wla-swap{display:grid;grid-template-rows:1fr;opacity:1;margin-bottom:0;transition:grid-template-rows var(--dur-wla-swap) ease-in-out,opacity var(--dur-wla-swap) ease-in-out,margin-bottom var(--dur-wla-swap) ease-in-out,visibility 0s linear 0s}
+/* 收合後不可點、不可聚焦（visibility 等動畫結束才切換） */
+.wla-swap.is-collapsed{grid-template-rows:0fr;opacity:0;margin-bottom:-16px;visibility:hidden;pointer-events:none;transition:grid-template-rows var(--dur-wla-swap) ease-in-out,opacity var(--dur-wla-swap) ease-in-out,margin-bottom var(--dur-wla-swap) ease-in-out,visibility 0s linear var(--dur-wla-swap)}
+.wla-swap-inner{min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:16px}
+@media (prefers-reduced-motion:reduce){.wla-swap,.wla-swap.is-collapsed{transition:none}}
+/* 新增候位視窗內的提示（「已套用會員資料」） */
+.wla-toast{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);padding:10px;border-radius:8px;background:var(--c-wla-toast-bg);color:var(--c-wla-toast-fg);font-size:var(--fs-wla-label);line-height:16px;white-space:nowrap;pointer-events:none;z-index:2;animation:wl-fade-in var(--dur-base) ease-out both}
+
+/* 搜尋會員：疊在新增候位上方；遮罩點擊不關閉（只能按「取消」） */
+.wlm-scrim{position:absolute;inset:0;background:var(--c-wl-scrim);z-index:44;animation:wl-fade-in var(--dur-base) ease-out both}
+/* 位置與高度由 JS 設定：狀態列以下的區域置中，最高 640px */
+.wlm-panel{position:absolute;left:50%;width:540px;margin-left:-270px;border-radius:13px;background:var(--c-white);overflow:hidden;display:flex;flex-direction:column;z-index:45;animation:wl-fade-in var(--dur-base) ease-out both}
+.wlm-header{flex-shrink:0;padding:0 16px 10px;background:var(--c-wlm-header-bg);color:var(--c-wlm-header-fg)}
+.wlm-title-row{height:51px;padding-bottom:3px;display:flex;align-items:center}
+.wlm-leading,.wlm-trailing{width:70px;display:flex;align-items:center}
+.wlm-trailing{justify-content:flex-end;font-size:var(--fs-wlm-title);line-height:24px;cursor:pointer}
+.wlm-title{flex:1;text-align:center;font-size:var(--fs-wlm-title);line-height:24px;font-weight:500}
+.wlm-tools{display:flex;flex-direction:column;gap:17px}
+.wlm-search{height:36px;padding:0 8px;border-radius:10px;background:var(--c-wlm-search-bg);display:flex;align-items:center;gap:8px;color:var(--c-wlm-search-fg)}
+.wlm-search-input{flex:1;min-width:0;height:22px;padding:0;border:0;outline:0;background:transparent;font-family:var(--font-family);font-size:var(--fs-wlm-row);line-height:22px;color:#000;-webkit-user-select:text;user-select:text}
+.wlm-search-input::placeholder{color:var(--c-wlm-search-fg)}
+.wlm-seg{height:32px;padding:0 2px;border-radius:8px;background:var(--c-wlm-seg-bg);display:flex;align-items:center}
+.wlm-seg-item{flex:1;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:var(--fs-wlm-seg);line-height:18px;font-weight:500;color:var(--c-wlm-header-fg);cursor:pointer}
+.wlm-seg-item.is-active{background:var(--c-wlm-seg-active-bg);color:var(--c-wlm-seg-active-fg);box-shadow:var(--sh-wlm-seg-active)}
+.wlm-seg-divider{width:1px;height:16px;background:var(--c-wlm-seg-divider)}
+.wlm-list{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.wlm-section{height:28px;padding:0 16px;display:flex;align-items:center;background:var(--c-wlm-section-bg);border-top:.5px solid var(--c-wlm-section-border);font-size:var(--fs-wla-label);line-height:20px;font-weight:500;color:var(--c-wlm-section-fg)}
+.wlm-row{padding-left:16px;cursor:pointer}
+.wlm-row-inner{padding:3px 0 4px;border-bottom:.5px solid var(--c-wlm-row-border);display:flex;flex-direction:column;white-space:nowrap}
+.wlm-row-main{font-size:var(--fs-wlm-row);line-height:22px;color:#000}
+.wlm-row-sub{font-size:var(--fs-wlm-row-sub);line-height:16px;color:var(--c-wlm-row-sub)}
+.wlm-empty{padding:24px 16px;text-align:center;font-size:var(--fs-wla-label);color:var(--c-wlm-section-fg)}
+.wla-note{display:block;width:100%;height:100%;padding:0;border:0;outline:0;resize:none;background:transparent;font-family:var(--font-family);font-size:var(--fs-wla-body);line-height:20px;color:#000;-webkit-user-select:text;user-select:text}
+
+/* 桌卡（點擊佔桌的桌）：提示列、遮罩、桌卡疊在桌位圖與底部頁籤列上，不蓋導覽列與篩選列；top 由 JS 設定 */
+.tc-scrim{position:absolute;left:0;right:0;bottom:0;background:var(--c-tc-scrim);z-index:25;animation:wl-fade-in var(--dur-base) ease-out both}
+.tc-hint{position:absolute;left:0;right:0;height:52px;padding:0 16px;background:var(--c-drag-hint-bg);color:var(--c-drag-hint-fg);font-size:var(--fs-drag-hint);line-height:24px;font-weight:500;display:flex;align-items:center;justify-content:space-between;z-index:26;animation:wl-fade-in var(--dur-base) ease-out both}
+/* 候位開桌選桌模式：空桌外框（同拖曳目標空桌）呼吸動態；提示列在開桌視窗遮罩之下 */
+.table.is-seat-target::after{content:'';position:absolute;inset:-2px;border-radius:inherit;box-shadow:var(--sh-table-drop-empty);pointer-events:none;animation:seat-breathe var(--dur-seat-breathe) ease-in-out infinite}
+@keyframes seat-breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(var(--seat-breathe-scale))}}
+@media (prefers-reduced-motion:reduce){.table.is-seat-target::after{animation:none}}
+/* 落桌回饋（R64）：桌子輕彈一次，光圈從桌緣往外擴散淡出 */
+.table.is-landed{animation:land-pop var(--dur-land-pop) cubic-bezier(.34,1.56,.64,1) var(--land-delay) both}
+.table.is-landed::before{content:'';position:absolute;inset:0;border-radius:inherit;box-shadow:0 0 0 var(--land-ring-width) var(--c-table-accent);opacity:0;pointer-events:none;animation:land-ring var(--dur-land-ring) ease-out var(--land-delay)}
+@keyframes land-pop{0%,100%{transform:scale(1)}50%{transform:scale(var(--land-pop-scale))}}
+@keyframes land-ring{from{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(var(--land-ring-scale))}}
+@keyframes land-static{0%,50%{opacity:1}to{opacity:0}}
+@media (prefers-reduced-motion:reduce){
+  .table.is-landed{animation:none}
+  .table.is-landed::before{box-shadow:var(--sh-table-drop-empty);animation:land-static var(--dur-land-static) ease-out var(--land-delay)}
+}
+/* 選桌提示列：在桌位與拖曳卡之上、篩選列下拉選單（20）之下，不蓋住選單 */
+.tc-hint.seat-hint{z-index:19}
+.tc-seat-notice{display:flex;align-items:center;gap:4px;padding:0 16px;font-size:var(--fs-wla-label);line-height:20px;font-weight:500;color:var(--c-op-primary)}
+.tc-seat-notice svg{display:block;flex-shrink:0}
+.mv-notice{padding:0}
+.tc-hint-btn{padding:4px 10px;font-size:var(--fs-tc-hint-btn);line-height:20px;font-weight:500;color:var(--c-tc-hint-btn);cursor:pointer}
+/* top、height 由 JS 設定：提示列下方 20px 起、距畫面底 60px（依 Figma 比例），內容在卡片內捲動 */
+.tc-panel{position:absolute;left:50%;width:540px;margin-left:-270px;border-radius:13px;background:var(--c-wla-bg);box-shadow:var(--sh-tc);overflow:hidden;display:flex;flex-direction:column;z-index:26;animation:wl-fade-in var(--dur-base) ease-out both}
+.tc-nav{position:absolute;top:0;left:0;right:0;height:44px;padding:0 16px 0 24px;display:flex;align-items:center;justify-content:space-between;background:var(--c-wla-nav-bg);-webkit-backdrop-filter:blur(25px);backdrop-filter:blur(25px);border-bottom:.33px solid var(--c-wla-nav-border);z-index:1}
+.tc-nav-btn{font-size:var(--fs-wla-body);line-height:24px;font-weight:500;color:var(--c-op-primary);cursor:pointer}
+.tc-nav-btn.is-danger{color:var(--c-tc-danger)}
+.tc-nav-title{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:12px;white-space:nowrap}
+.tc-status{display:flex;align-items:center;gap:4px;font-size:var(--fs-wla-nav-title);line-height:22px;font-weight:600;letter-spacing:-.43px;color:#000}
+.tc-status-dot{width:12px;height:12px;border-radius:100px}
+.tc-opened{font-size:var(--fs-wla-body);line-height:20px;color:#000}
+.tc-body{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:60px 0 20px;display:flex;flex-direction:column;gap:12px}
+.tc-total{height:48px;padding:8px 12px 8px 16px;display:flex;align-items:center;justify-content:space-between;font-size:var(--fs-wla-body);line-height:24px;font-weight:500;color:#000}
+/* 空桌桌卡：合計與低消之間的分隔線（左側內縮 16px，同來客數各列） */
+.tc-total.has-divider{margin-left:16px;padding-left:0;border-bottom:1px solid var(--c-op-line)}
+.tc-total-val{font-weight:400;line-height:20px;color:var(--c-tc-value)}
+.tc-subtitle-wide{padding-left:20px}
+.tc-tags{padding:12px 20px}
+.tc-note-wrap{height:120px;padding:8px 20px}
+.tc-note-wrap .wla-note{padding:14px 16px;font-weight:500;line-height:24px}
+.tc-note-wrap .wla-note::placeholder{color:var(--c-tc-value);opacity:var(--op-tc-note-placeholder)}
+.tc-footer{flex-shrink:0;padding:16px 20px;display:flex;gap:16px;background:var(--c-white);border-top:1px solid var(--c-op-line)}
+.tc-footer .nav-btn{flex:1;height:38px}
+/* 佔桌＋待確認訂單：內容改為訂單卡（上方距頂部列 12px） */
+.tc-body.is-order{padding-top:56px}
+.tc-nav-spacer{width:1px}
+.tc-order{background:var(--c-white)}
+.tc-order-head{padding:16px 32px;display:flex;align-items:center;justify-content:space-between;background:var(--c-tc-order-head-bg);color:var(--c-tc-order-head-fg);font-size:var(--fs-tc-order-title);line-height:24px;font-weight:600;white-space:nowrap}
+.tc-order-page{width:62px;display:flex;align-items:center;justify-content:flex-end;gap:4px}
+.tc-order-page img{display:block;flex-shrink:0}
+.tc-order-sub{padding:8px 16px;background:var(--c-wla-bg);font-size:var(--fs-wla-body);line-height:24px;font-weight:500;color:#000}
+.tc-order-item{padding:8px 16px;display:flex;flex-direction:column;gap:4px;border-bottom:1px solid var(--c-op-line);line-height:24px}
+.tc-order-item:last-child{border-bottom:0}
+.tc-order-name{display:flex;justify-content:space-between;font-size:var(--fs-tc-order-title);font-weight:600;color:var(--c-tc-order-pending)}
+.tc-order-spec{font-size:var(--fs-wla-body);font-weight:500;color:#000}
+/* 一般訂單卡：藍色標題列、顧客列、淡黃底黑字品項（最後一項也有分隔線） */
+.tc-order.is-paid .tc-order-head{padding:12px 16px;background:var(--c-tc-order-paid-bg);color:var(--c-tc-order-paid-fg)}
+.tc-order.is-paid .tc-order-item{background:var(--c-tc-order-item-bg)}
+.tc-order.is-paid .tc-order-item:last-child{border-bottom:1px solid var(--c-op-line)}
+.tc-order.is-paid .tc-order-name{color:#000}
+.tc-order-cust{padding:8px 16px;display:flex;flex-direction:column;gap:4px;background:var(--c-tc-order-cust-bg);font-size:var(--fs-tc-order-title);line-height:24px;font-weight:600;color:#000;white-space:nowrap}
+.tc-order-cust-row{display:flex;gap:4px}
+/* 待離桌：無訂單，中間為圖片佔位、說明與「清桌」（方塊上緣距桌卡頂 184px） */
+.tc-body.is-done{padding-top:184px;align-items:center;gap:0}
+.tc-done-img{width:135px;height:135px;flex-shrink:0;border-radius:6px;background:var(--c-tc-done-placeholder)}
+.tc-done-text{margin-top:16px;font-size:var(--fs-tc-done);line-height:16px;color:var(--c-tc-value)}
+/* 桌卡內的會員卡片切換與展開：區塊間距為 12px，收合時以 -12px 抵銷 */
+.tc-body .wla-swap.is-collapsed{margin-bottom:-12px}
+.tc-body .wla-swap-inner{gap:12px}
+.tc-panel .wla-toast{bottom:92px}
+/* 空桌桌卡（一般掃碼點餐）：高度依內容，於提示列下方區域垂直置中（top、max-height 由 JS 設定） */
+.tc-panel.is-open{height:auto;transform:translateY(-50%)}
+.tc-panel.is-open .tc-body{flex:1 1 auto;padding:64px 0 0}
+.tc-panel.is-open .tc-body.is-adv{padding-bottom:20px}
+.tc-panel.is-open .tc-body.is-adv,.tc-panel.is-open .tc-nav-adv,.tc-panel.is-adv .tc-body.is-main,.tc-panel.is-adv .tc-nav-main,.tc-panel.is-adv .tc-footer{display:none}
+.tc-panel.is-adv .tc-body.is-adv,.tc-panel.is-adv .tc-nav-adv{display:flex}
+.tc-nav-main,.tc-nav-adv{flex:1;display:flex;align-items:center;justify-content:space-between}
+.tc-nav-plain-title{position:absolute;left:50%;transform:translateX(-50%);font-size:var(--fs-wla-nav-title);line-height:22px;font-weight:600;letter-spacing:-.43px;color:#000;white-space:nowrap}
+.tc-nav-back{display:flex;align-items:center;gap:6px;margin-left:-16px}
+.tc-rows{padding:12px 16px}
+.tc-row{height:48px;padding:8px 12px 8px 0;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--c-op-line);font-size:var(--fs-wla-body);line-height:24px;font-weight:500;color:#000;white-space:nowrap}
+.tc-row:last-child{border-bottom:0}
+.tc-row[data-act]{cursor:pointer}
+.tc-row-val{display:flex;align-items:center;gap:4px;font-weight:400;line-height:20px;color:var(--c-tc-value)}
+.tc-expand-btn{align-self:center;padding:4px 8px 4px 12px;display:flex;align-items:center;font-size:var(--fs-tc-expand);line-height:20px;font-weight:500;color:var(--c-op-primary);cursor:pointer}
+.tc-expand-btn img{display:block;transition:transform var(--dur-wla-swap) ease-in-out}
+.tc-expand-btn.is-open img{transform:rotate(180deg)}
+.tc-footer.is-open{padding:20px 16px;background:transparent;border-top:0}
+.tc-adv-group{background:var(--c-white)}
+.tc-adv-group .tc-row{padding-left:16px}
+.tc-toggle{position:relative;width:51px;height:31px;flex-shrink:0;border-radius:100px;background:var(--c-tc-toggle-off);cursor:pointer;transition:background var(--dur-base)}
+.tc-toggle::after{content:'';position:absolute;left:2px;top:2px;width:27px;height:27px;border-radius:100px;background:var(--c-tc-toggle-knob);box-shadow:var(--sh-tc-toggle-knob);transition:transform var(--dur-base)}
+.tc-toggle.is-on{background:var(--c-tc-toggle-on)}
+.tc-toggle.is-on::after{transform:translateX(20px)}
+@media (prefers-reduced-motion:reduce){.tc-toggle,.tc-toggle::after,.tc-expand-btn img{transition:none}}
+.tc-done-btn{margin-top:8px;padding:4px 10px;font-size:var(--fs-tc-done);line-height:20px;font-weight:500;color:var(--c-op-primary);cursor:pointer}
+</style>
+</head>
+<body>
+<div class="stage">
+<div class="device" id="device">
+<div class="screen" id="screen">
+  <div class="statusbar-area" id="statusbarArea"></div>
+
+
+  <div class="navbar">
+    <div class="nav-left">
+      <img class="op-icon settings-btn" id="settingsBtn" data-act="settings" src="data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjI4IiBoZWlnaHQ9IjI4IiB2aWV3Qm94PSIwIDAgMjggMjgiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxnIGlkPSJpY29uL3NldHRpbmdzIj4KPGcgaWQ9ImxpbmUiPgo8cGF0aCBpZD0ibGluZV90b3AiIGQ9Ik01LjI1IDguMTY2NjdDNy41ODMzNSA4LjE2NjY3IDUuMjUwMDEgOC4xNjY2NyA3LjU4MzM1IDguMTY2NjciIHN0cm9rZT0iYmxhY2siIHN0cm9rZS13aWR0aD0iMS40IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPHBhdGggaWQ9ImxpbmVfdG9wXzIiIGQ9Ik01LjI1IDIxQzcuNTgzMzUgMjEgNS4yNTAwMSAyMSA3LjU4MzM1IDIxIiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjEuNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CjxwYXRoIGlkPSJsaW5lX3RvcF8zIiBkPSJNMTIuMjUgOC4xNjY2N0gyMy4zMzMzIiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjEuNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CjxwYXRoIGlkPSJsaW5lX3RvcF80IiBkPSJNMTIuMjUgMjFIMjMuMzMzMyIgc3Ryb2tlPSJibGFjayIgc3Ryb2tlLXdpZHRoPSIxLjQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8cGF0aCBpZD0ibGluZV9ib3R0b20iIGQ9Ik0yMC40MTY3IDE0SDIzLjMzMzMiIHN0cm9rZT0iYmxhY2siIHN0cm9rZS13aWR0aD0iMS40IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPHBhdGggaWQ9ImxpbmVfYm90dG9tXzIiIGQ9Ik01LjI1IDE0SDE1Ljc1IiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjEuNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CjxyZWN0IGlkPSJrbm9iX3RvcCIgeD0iOS4zMzMzMyIgeT0iNS44MzMzMyIgd2lkdGg9IjEuNCIgaGVpZ2h0PSI0LjY2NjY3IiByeD0iMC43IiBmaWxsPSJibGFjayIvPgo8cmVjdCBpZD0ia25vYl90b3BfMiIgeD0iOS4zMzMzMyIgeT0iMTguNjY2NyIgd2lkdGg9IjEuNCIgaGVpZ2h0PSI0LjY2NjY3IiByeD0iMC43IiBmaWxsPSJibGFjayIvPgo8cmVjdCBpZD0ia25vYl9ib3R0b20iIHg9IjE3LjUiIHk9IjExLjY2NjciIHdpZHRoPSIxLjQiIGhlaWdodD0iNC42NjY2NyIgcng9IjAuNyIgZmlsbD0iYmxhY2siLz4KPC9nPgo8L2c+Cjwvc3ZnPgo=" width="28" height="28" alt="">
+      <img class="op-icon op-divider" src="data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjEiIGhlaWdodD0iMjgiIHZpZXdCb3g9IjAgMCAxIDI4IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cGF0aCBpZD0iVmVjdG9yIDUiIGQ9Ik0wLjUgMFYyOCIgc3Ryb2tlPSIjQ0NDQ0NDIi8+Cjwvc3ZnPgo=" width="1" height="28" alt="">
+      <div class="slot" id="floorTabs"></div>
+    </div>
+    <div class="nav-right">
+      <div class="nav-actions">
+        <div class="nav-btn nav-btn-secondary">桌號未定<span class="nav-btn-badge">4</span></div>
+        <div class="nav-btn nav-btn-primary" id="waitlistBtn" data-act="waitlist">候位<span class="nav-btn-badge" id="waitlistCount"></span></div>
+        <img class="op-icon op-divider" src="data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjEiIGhlaWdodD0iMjgiIHZpZXdCb3g9IjAgMCAxIDI4IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cGF0aCBpZD0iVmVjdG9yIDUiIGQ9Ik0wLjUgMFYyOCIgc3Ryb2tlPSIjQ0NDQ0NDIi8+Cjwvc3ZnPgo=" width="1" height="28" alt="">
+      </div>
+      <img class="op-icon" src="data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjI4IiBoZWlnaHQ9IjI4IiB2aWV3Qm94PSIwIDAgMjggMjgiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxnIGlkPSJpY29uL2Nsb3VkIj4KPHBhdGggaWQ9IlVuaW9uIiBkPSJNMTEuMTY4NiA1Ljc2NDk3QzEzLjMwNTcgNS43NjQ5NyAxNS4xOTQgNi44MjMwMiAxNi4zNDQ0IDguNDQxNzNDMTYuNzIwOCA4LjM1Mjc5IDE3LjExMzcgOC4zMDUwMSAxNy41MTczIDguMzA1MDFDMjAuMzIxNyA4LjMwNTIgMjIuNTk1MiAxMC41Nzc3IDIyLjU5NTQgMTMuMzgyMkMyMi41OTU0IDEzLjU0OTQgMjIuNTg1OCAxMy43MTUxIDIyLjU3IDEzLjg3ODNDMjMuNzIyMiAxNC41MzMyIDI0LjQ5OTcgMTUuNzcxNyAyNC40OTk3IDE3LjE5MTdDMjQuNDk5NCAxOS4yOTQ5IDIyLjc5NDMgMjEuMDAwMSAyMC42OTExIDIxLjAwMDNINi43MjUyNkM0LjYyMTk4IDIxLjAwMDIgMi45MTY5MyAxOS4yOTUgMi45MTY2NyAxNy4xOTE3QzIuOTE2NjcgMTUuNjkyOCAzLjc4Mjg0IDE0LjM5NjMgNS4wNDE2NyAxMy43NzQ3QzQuODk4NDUgMTMuMjQ1MyA0LjgyMTAzIDEyLjY4ODMgNC44MjA5NiAxMi4xMTM2QzQuODIwOTYgOC42MDc4NiA3LjY2MjkyIDUuNzY1MTYgMTEuMTY4NiA1Ljc2NDk3Wk0xMS4xNjg2IDcuMTY1MzZDOC41MjEyNyA3LjE2NTU1IDYuMzU4NSA5LjI0NTI0IDYuMjI2MjQgMTEuODU5N0w2LjIyMDM4IDEyLjExMzZDNi4yMjA0NCAxMi41NjE0IDYuMjgxNDEgMTIuOTk1MSA2LjM5MzIzIDEzLjQwODVDNi41Njc4NCAxNC4wNTQgNi4yNjEyIDE0LjczMzMgNS42NjE3OCAxNS4wMjk2QzQuODYyMTQgMTUuNDI0NSA0LjMxNzA2IDE2LjI0NjEgNC4zMTcwNiAxNy4xOTE3QzQuMzE3MzIgMTguNTIxOCA1LjM5NTE4IDE5LjU5OTggNi43MjUyNiAxOS41OTk5SDIwLjY5MTFDMjIuMDIxMiAxOS41OTk3IDIzLjEgMTguNTIxNSAyMy4xMDAzIDE3LjE5MTdDMjMuMTAwMyAxNi4yOTYxIDIyLjYxMTMgMTUuNTExNiAyMS44Nzg2IDE1LjA5NTFDMjEuMzk4NiAxNC44MjIzIDIxLjEyMzQgMTQuMjkyOSAyMS4xNzY0IDEzLjc0MzVMMjEuMTk1IDEzLjM4MjJDMjEuMTk0OCAxMS40MTQ1IDE5LjY0OTkgOS44MDgwNiAxNy43MDY3IDkuNzA5MzFMMTcuNTE3MyA5LjcwNDQzQzE3LjIyNDkgOS43MDQ0MyAxNi45NDA3IDkuNzM5NTggMTYuNjY3NiA5LjgwNDA0QzE2LjExMzEgOS45MzUwOCAxNS41MzI5IDkuNzE2NzEgMTUuMjAyOCA5LjI1MjI4QzE0LjMwMyA3Ljk4NjQyIDEyLjgzMTkgNy4xNjUzNiAxMS4xNjg2IDcuMTY1MzZaIiBmaWxsPSJibGFjayIvPgo8L2c+Cjwvc3ZnPgo=" width="28" height="28" alt="">
+    </div>
+  </div>
+
+  <div class="filterbar">
+    <div class="filter-left">
+      <div class="slot" id="chips"></div>
+      <img class="op-icon op-divider" src="data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjEiIGhlaWdodD0iMjgiIHZpZXdCb3g9IjAgMCAxIDI4IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cGF0aCBpZD0iVmVjdG9yIDUiIGQ9Ik0wLjUgMFYyOCIgc3Ryb2tlPSIjQ0NDQ0NDIi8+Cjwvc3ZnPgo=" width="1" height="28" alt="">
+      <div class="dropdown dropdown-seat" id="seatBtn" data-act="seatMenu"><span id="seatLabel">座位數</span><img class="op-icon" src="data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjIwIiBoZWlnaHQ9IjIwIiB2aWV3Qm94PSIwIDAgMjAgMjAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxnIGlkPSJpY29uL2Fycm93X2Rvd24iPgo8cGF0aCBpZD0iVW5pb24iIGQ9Ik00LjYyNDAyIDguNzk0NjdMNS4zMzA2NyA4LjA4ODAyTDEwLjEzOTEgMTIuODk2NEwxNC45NDkyIDguMDg2MjlMMTUuNjU1OSA4Ljc5Mjk0TDEwLjEzOTEgMTQuMzA5N0w0LjYyNDAyIDguNzk0NjdaIiBmaWxsPSJibGFjayIvPgo8L2c+Cjwvc3ZnPgo=" width="20" height="20" alt=""></div>
+      <div class="dropdown dropdown-tag" id="tagBtn" data-act="tagMenu">標籤<span class="slot" id="tagCount"></span><img class="op-icon" src="data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjIwIiBoZWlnaHQ9IjIwIiB2aWV3Qm94PSIwIDAgMjAgMjAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxnIGlkPSJpY29uL2Fycm93X2Rvd24iPgo8cGF0aCBpZD0iVW5pb24iIGQ9Ik00LjYyNDAyIDguNzk0NjdMNS4zMzA2NyA4LjA4ODAyTDEwLjEzOTEgMTIuODk2NEwxNC45NDkyIDguMDg2MjlMMTUuNjU1OSA4Ljc5Mjk0TDEwLjEzOTEgMTQuMzA5N0w0LjYyNDAyIDguNzk0NjdaIiBmaWxsPSJibGFjayIvPgo8L2c+Cjwvc3ZnPgo=" width="20" height="20" alt=""></div>
+      <div class="slot" id="filterClear"></div>
+    </div>
+    <div class="filter-total" id="filterTotal"></div>
+  </div>
+
+  <div class="floor" id="floor">
+    <div class="canvas" id="canvas">
+      <div class="slot" id="obstacles"></div>
+      <div class="slot" id="tables"></div>
+    </div>
+    <div class="slot" id="popover"></div>
+    <div class="minimap">
+      <div class="minimap-grid-v"></div>
+      <div class="minimap-grid-h"></div>
+      <div class="minimap-viewport" id="miniViewport"></div>
+    </div>
+    <div class="slot" id="ghost"></div>
+    <div class="slot" id="dragHint"></div>
+    <div class="slot" id="toast"></div>
+  </div>
+
+  <div class="slot" id="tabs"></div>
+  <div class="slot" id="settingsMenu"></div>
+  <div class="slot" id="tagMenu"></div>
+  <div class="slot" id="seatMenu"></div>
+  <div class="slot" id="seatHint"></div>
+  <div class="slot" id="tableCard"></div>
+  <div class="slot" id="clearAlert"></div>
+  <div class="slot" id="moveDialog"></div>
+  <div class="slot" id="leaveAlert"></div>
+  <div class="slot" id="waitlist"></div>
+  <div class="slot" id="wlAdd"></div>
+  <div class="slot" id="wlMember"></div>
+  <div class="slot" id="memberInfo"></div>
+  <div class="slot" id="wlCancel"></div>
+  <div class="slot" id="needsPool"></div>
+
+</div>
+</div>
+</div>
+
+<script>
+// iOS Safari 需有 touchstart 監聽，按鈕的 :active（pressed 樣式）才會在觸控時生效
+document.addEventListener('touchstart', () => {}, { passive: true });
+const ST = {
+  empty:   { label: '空桌',   bg: 'var(--st-empty-bg)',   color: 'var(--st-empty-fg)',   dot: 'var(--st-empty-dot)',   userIcon: 'userDark' },
+  seated:  { label: '佔桌',   bg: 'var(--st-seated-bg)',  color: 'var(--st-seated-fg)',  dot: 'var(--st-seated-dot)',  userIcon: 'userDark' },
+  cooking: { label: '出餐中', bg: 'var(--st-cooking-bg)', color: 'var(--st-cooking-fg)', dot: 'var(--st-cooking-dot)', userIcon: 'userDark' },
+  served:  { label: '已出餐', bg: 'var(--st-served-bg)',  color: 'var(--st-served-fg)',  dot: 'var(--st-served-dot)',  userIcon: 'userServed' },
+  leaving: { label: '待離桌', bg: 'var(--st-leaving-bg)', color: 'var(--st-leaving-fg)', dot: 'var(--st-leaving-dot)', userIcon: 'userLeaving' },
+};
+const ORDER = ['empty', 'seated', 'cooking', 'served', 'leaving'];
+// Figma 匯出的原始 SVG（內嵌以維持單一檔案）
+const ICON = {
+  plus: 'data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiB2aWV3Qm94PSIwIDAgMzIgMzIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxnIGlkPSJidG5faWNvbiI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMSIgY3g9IjE2IiBjeT0iMTYiIHI9IjE0IiBmaWxsPSIjMDA5MkIxIi8+CjxnIGlkPSJJY29uIj4KPHBhdGggaWQ9IlVuaW9uIiBkPSJNMTYuOTE2MyAxNC45OTk3SDIyLjI1MDNWMTUuOTk5N0gxNi45MTYzVjIxLjgzMzdIMTUuOTE3M1YxNS45OTk3SDEwLjU4MzNWMTQuOTk5N0gxNS45MTczVjEwLjE2NjdIMTYuOTE2M1YxNC45OTk3WiIgZmlsbD0id2hpdGUiLz4KPC9nPgo8L2c+Cjwvc3ZnPgo=',
+  userDark: 'data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiB2aWV3Qm94PSIwIDAgMTYgMTYiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxnIGlkPSJVc2VyIEljb24iPgo8ZyBpZD0ibGluZSI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMSIgY3g9IjgiIGN5PSI1IiByPSIxLjkzMzMzIiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjAuOCIvPgo8cGF0aCBpZD0iUmVjdGFuZ2xlIDI0IiBkPSJNMTIuMzMzMyAxMi42NjY3VjEyLjMzMzNDMTIuMzMzMyA5Ljk0MDEgMTAuMzkzMiA4IDggOEM1LjYwNjc3IDggMy42NjY2NyA5Ljk0MDEgMy42NjY2NyAxMi4zMzMzVjEyLjY2NjciIHN0cm9rZT0iYmxhY2siIHN0cm9rZS13aWR0aD0iMC44Ii8+CjwvZz4KPHBhdGggaWQ9IlVuaW9uIiBkPSJNOC4wMDAzMyA3LjYwMDI2QzEwLjYxNDMgNy42MDA0NCAxMi43MzI3IDkuNzE5NjIgMTIuNzMyNyAxMi4zMzM3VjEyLjY2NjdIMTEuOTMzOVYxMi4zMzM3QzExLjkzMzkgMTAuMTYxNCAxMC4xNzI1IDguNDAwMjQgOC4wMDAzMyA4LjQwMDA3QzUuODI4MDEgOC40MDAwNyA0LjA2NjczIDEwLjE2MTMgNC4wNjY3MyAxMi4zMzM3VjEyLjY2NjdIMy4yNjY5M1YxMi4zMzM3QzMuMjY2OTMgOS43MTk1MSA1LjM4NjE4IDcuNjAwMjYgOC4wMDAzMyA3LjYwMDI2Wk04LjAwMDMzIDIuNjY2NjdDOS4yODg3MyAyLjY2Njg0IDEwLjMzMzIgMy43MTEyNyAxMC4zMzMzIDQuOTk5NjdDMTAuMzMzMyA2LjI4ODIzIDkuMjg4ODQgNy4zMzM0OCA4LjAwMDMzIDcuMzMzNjZDNi43MTE2NiA3LjMzMzY2IDUuNjY2MzQgNi4yODgzNCA1LjY2NjM0IDQuOTk5NjdDNS42NjY1MiAzLjcxMTE2IDYuNzExNzcgMi42NjY2NyA4LjAwMDMzIDIuNjY2NjdaTTguMDAwMzMgMy40NjY0N0M3LjE1MzYgMy40NjY0NyA2LjQ2NzMgNC4xNTI5OSA2LjQ2NzEyIDQuOTk5NjdDNi40NjcxMiA1Ljg0NjUxIDcuMTUzNDkgNi41MzI4OCA4LjAwMDMzIDYuNTMyODhDOC44NDcwMSA2LjUzMjcgOS41MzM1MyA1Ljg0NjQgOS41MzM1MyA0Ljk5OTY3QzkuNTMzMzUgNC4xNTMxIDguODQ2OSAzLjQ2NjY1IDguMDAwMzMgMy40NjY0N1oiIGZpbGw9ImJsYWNrIi8+CjwvZz4KPC9zdmc+Cg==',
+  userServed: 'data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiB2aWV3Qm94PSIwIDAgMTYgMTYiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxnIGlkPSJVc2VyIGljb24iPgo8ZyBpZD0ibGluZSI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMSIgY3g9IjgiIGN5PSI1IiByPSIxLjkzMzMzIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjAuOCIvPgo8cGF0aCBpZD0iUmVjdGFuZ2xlIDI0IiBkPSJNMTIuMzMzMyAxMi42NjY3VjEyLjMzMzNDMTIuMzMzMyA5Ljk0MDEgMTAuMzkzMiA4IDggOEM1LjYwNjc3IDggMy42NjY2NyA5Ljk0MDEgMy42NjY2NyAxMi4zMzMzVjEyLjY2NjciIHN0cm9rZT0iYmxhY2siIHN0cm9rZS13aWR0aD0iMC44Ii8+CjwvZz4KPHBhdGggaWQ9IlVuaW9uIiBkPSJNOC4wMDAzMyA3LjYwMDI2QzEwLjYxNDMgNy42MDA0NCAxMi43MzI3IDkuNzE5NjIgMTIuNzMyNyAxMi4zMzM3VjEyLjY2NjdIMTEuOTMzOVYxMi4zMzM3QzExLjkzMzkgMTAuMTYxNCAxMC4xNzI1IDguNDAwMjQgOC4wMDAzMyA4LjQwMDA3QzUuODI4MDEgOC40MDAwNyA0LjA2NjczIDEwLjE2MTMgNC4wNjY3MyAxMi4zMzM3VjEyLjY2NjdIMy4yNjY5M1YxMi4zMzM3QzMuMjY2OTMgOS43MTk1MSA1LjM4NjE4IDcuNjAwMjYgOC4wMDAzMyA3LjYwMDI2Wk04LjAwMDMzIDIuNjY2NjdDOS4yODg3MyAyLjY2Njg0IDEwLjMzMzIgMy43MTEyNyAxMC4zMzMzIDQuOTk5NjdDMTAuMzMzMyA2LjI4ODIzIDkuMjg4ODQgNy4zMzM0OCA4LjAwMDMzIDcuMzMzNjZDNi43MTE2NiA3LjMzMzY2IDUuNjY2MzQgNi4yODgzNCA1LjY2NjM0IDQuOTk5NjdDNS42NjY1MiAzLjcxMTE2IDYuNzExNzcgMi42NjY2NyA4LjAwMDMzIDIuNjY2NjdaTTguMDAwMzMgMy40NjY0N0M3LjE1MzYgMy40NjY0NyA2LjQ2NzMgNC4xNTI5OSA2LjQ2NzEyIDQuOTk5NjdDNi40NjcxMiA1Ljg0NjUxIDcuMTUzNDkgNi41MzI4OCA4LjAwMDMzIDYuNTMyODhDOC44NDcwMSA2LjUzMjcgOS41MzM1MyA1Ljg0NjQgOS41MzM1MyA0Ljk5OTY3QzkuNTMzMzUgNC4xNTMxIDguODQ2OSAzLjQ2NjY1IDguMDAwMzMgMy40NjY0N1oiIGZpbGw9IndoaXRlIi8+CjwvZz4KPC9zdmc+Cg==',
+  userLeaving: 'data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiB2aWV3Qm94PSIwIDAgMTYgMTYiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxnIGlkPSJVc2VyIEljb24iPgo8ZyBpZD0ibGluZSI+CjxjaXJjbGUgaWQ9IkVsbGlwc2UgMSIgY3g9IjgiIGN5PSI1IiByPSIxLjkzMzMzIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjAuOCIvPgo8cGF0aCBpZD0iUmVjdGFuZ2xlIDI0IiBkPSJNMTIuMzMzMyAxMi42NjY3VjEyLjMzMzNDMTIuMzMzMyA5Ljk0MDEgMTAuMzkzMiA4IDggOEM1LjYwNjc3IDggMy42NjY2NyA5Ljk0MDEgMy42NjY2NyAxMi4zMzMzVjEyLjY2NjciIHN0cm9rZT0iYmxhY2siIHN0cm9rZS13aWR0aD0iMC44Ii8+CjwvZz4KPHBhdGggaWQ9IlVuaW9uIiBkPSJNOC4wMDAzMyA3LjYwMDI2QzEwLjYxNDMgNy42MDA0NCAxMi43MzI3IDkuNzE5NjIgMTIuNzMyNyAxMi4zMzM3VjEyLjY2NjdIMTEuOTMzOVYxMi4zMzM3QzExLjkzMzkgMTAuMTYxNCAxMC4xNzI1IDguNDAwMjQgOC4wMDAzMyA4LjQwMDA3QzUuODI4MDEgOC40MDAwNyA0LjA2NjczIDEwLjE2MTMgNC4wNjY3MyAxMi4zMzM3VjEyLjY2NjdIMy4yNjY5M1YxMi4zMzM3QzMuMjY2OTMgOS43MTk1MSA1LjM4NjE4IDcuNjAwMjYgOC4wMDAzMyA3LjYwMDI2Wk04LjAwMDMzIDIuNjY2NjdDOS4yODg3MyAyLjY2Njg0IDEwLjMzMzIgMy43MTEyNyAxMC4zMzMzIDQuOTk5NjdDMTAuMzMzMyA2LjI4ODIzIDkuMjg4ODQgNy4zMzM0OCA4LjAwMDMzIDcuMzMzNjZDNi43MTE2NiA3LjMzMzY2IDUuNjY2MzQgNi4yODgzNCA1LjY2NjM0IDQuOTk5NjdDNS42NjY1MiAzLjcxMTE2IDYuNzExNzcgMi42NjY2NyA4LjAwMDMzIDIuNjY2NjdaTTguMDAwMzMgMy40NjY0N0M3LjE1MzYgMy40NjY0NyA2LjQ2NzMgNC4xNTI5OSA2LjQ2NzEyIDQuOTk5NjdDNi40NjcxMiA1Ljg0NjUxIDcuMTUzNDkgNi41MzI4OCA4LjAwMDMzIDYuNTMyODhDOC44NDcwMSA2LjUzMjcgOS41MzM1MyA1Ljg0NjQgOS41MzM1MyA0Ljk5OTY3QzkuNTMzMzUgNC4xNTMxIDguODQ2OSAzLjQ2NjY1IDguMDAwMzMgMy40NjY0N1oiIGZpbGw9IndoaXRlIi8+CjwvZz4KPC9zdmc+Cg==',
+};
+// 初始資料中有「待確認」標籤的桌（依 Figma 設計稿）
+const PENDING_IDS = [4, 6];
+const W = 1180, H = 620;
+// 畫布為 2 倍 W × H
+const CW = W * 2, CH = H * 2;
+// 畫面寬 1180 對齊視窗；高度填滿視窗，最高 820（更高時上下置中），最低 600（更矮時改以高度縮放）
+const SCREEN_MAX_H = 820, SCREEN_MIN_H = 600;
+// 桌位圖以外的固定高度：導覽列 61＋篩選列 53（各含 1px 分隔線）；底部頁籤列 64（拖曳中隱藏）
+const CHROME_H = 61 + 53, TABS_H = 64;
+// 拖曳自動捲動：距桌位圖邊緣 EDGE px 內開始捲動，越靠邊越快，每幀最多 EDGE_SPEED px
+const EDGE = 60, EDGE_SPEED = 14;
+// 桌卡的訂購人與來客數資料（大人＝入座人數－小孩－嬰兒，不另外記）；空桌為 null
+// 佔桌＋待確認訂單的桌卡顯示的訂單（依 Figma 假資料；待確認，不計入桌位金額）
+const PENDING_ORDER = [{ name: '拿鐵', price: 80, spec: '冰' }, { name: '開心果蛋糕', price: 60, spec: 'x鮮奶油' }, { name: '特製優格碗', price: 50, spec: '香蕉片,綜合果乾,綜合堅果' }];
+const TC_CUST = phone => ({ name: '', title: '不稱謂', phone, kids: 0, infants: 0, note: '', member: null, needs: [], fromWl: false });
+// 訂單明細：有訂單的桌都帶一筆（單號後三碼取桌位訂單編號、品項同一般訂單卡假資料、金額＝桌位金額），第 6 桌另帶多筆
+const MO = (no, name, phone, member, last3, items, price) => ({ no, name, phone, member, last3, items, price });
+const T = (id, shape, x, y, cap, status, guests, amount, mins, size) => {
+  const orderNo = status === 'empty' ? '' : '#A' + (1040 + id * 7), hasOrder = status !== 'empty' && status !== 'seated';
+  return { id, name: '第' + id + '桌', shape, x, y, cap, status, guests: guests || 0, amount: amount || 0, mins: mins || 0, size: size || 116, orderNo, orders: hasOrder ? 1 : 0,
+    list: hasOrder ? [MO(id * 100 + 1, '', '', false, orderNo.slice(-3), PENDING_ORDER.map(o => o.name).join(', '), amount || 0)] : null,
+    pending: PENDING_IDS.includes(id), cust: status === 'empty' ? null : TC_CUST('0912-123-456') };
+};
+// 第 6 桌的多筆訂單（依 Figma「選擇要換桌的訂單」假資料）；有姓名的都是會員（名字前顯示 👤）
+const ORDERS_6 = [
+  MO(7, '王小美', '0933-124-433', true, '343', '燻雞生菜三明治, 夏日莓果沙拉', 680),
+  MO(6, '王小美', '0933-124-433', true, '938', '特製優格碗', 130),
+  MO(5, '', '', false, '402', '培根花生堡, 燻雞生菜三明治, 香蕉磅蛋糕, 鮮榨檸檬汁, 美式咖啡', 1030),
+  MO(4, '', '', false, '345', '塔塔醬鱈魚堡, 8號紅茶', 390),
+  MO(3, '王小美', '0933-124-433', true, '244', '雙層牛肉堡, 松露薯條', 480),
+  MO(2, '', '', false, '993', '培根花生堡, 鮮奶茶', 330),
+  MO(1, 'Jenny Fan', '0958-662-130', true, '234', '燻雞生菜三明治', 230),
+];
+// 帶入訂單明細：訂單數、金額改由明細計算
+const withOrders = (t, list) => Object.assign(t, { list, orders: list.length, amount: list.reduce((n, o) => n + o.price, 0) });
+const SHAPE_LABEL = { circle: '圓桌', square: '方桌' };
+// 桌位顧客套用會員（第 3 桌為 Figma「本桌會員」中的李小姐；第 6 桌為其訂單明細中的會員王小美）
+const withMember = (t, name, phone) => Object.assign(t, { cust: { ...t.cust, member: { id: 900 + t.id, type: 0, level: '一般會員', name, phone } } });
+const FLOORS = {
+  '一樓': {
+    obstacles: [
+      { x: 115, y: 240, w: 100, h: 100, r: '50%', label: '盆栽/圓柱' },
+      { x: 50, y: 340, w: 125, h: 190, r: '4px', label: '櫃檯' },
+      { x: 225, y: 110, w: 44, h: 440, r: '4px', label: '牆', wm: 'vertical-rl' },
+      { x: 358, y: 248, w: 84, h: 84, r: '50%', label: '盆栽/圓柱' },
+      { x: 700, y: 40, w: 44, h: 180, r: '4px', label: '牆', wm: 'vertical-rl' },
+      { x: 700, y: 350, w: 44, h: 180, r: '4px', label: '牆', wm: 'vertical-rl' },
+      { x: 830, y: 80, w: 100, h: 100, r: '50%', label: '盆栽/圓柱' },
+    ],
+    tables: [
+      T(1, 'circle', 400, 130, 4, 'empty'),
+      T(2, 'square', 580, 130, 4, 'seated', 2, 0, 6),
+      withMember(T(3, 'circle', 1065, 130, 4, 'served', 3, 1460, 48), '李小姐', '0922-339-937'),
+      T(4, 'square', 400, 440, 4, 'seated', 3, 0, 4),
+      T(5, 'square', 580, 440, 4, 'leaving', 2, 980, 76),
+      withMember(withOrders(T(6, 'circle', 880, 440, 4, 'cooking', 2, 1280, 32), ORDERS_6), '王小美', '0933-124-433'),
+      T(7, 'circle', 1065, 440, 4, 'cooking', 3, 1720, 21),
+      T(8, 'square', 400, 760, 2, 'empty', 0, 0, 0, 96),
+      T(9, 'circle', 880, 760, 2, 'empty', 0, 0, 0, 96),
+    ],
+  },
+  '二樓': { obstacles: [{ x: 560, y: 60, w: 44, h: 460, r: '4px', label: '牆', wm: 'vertical-rl' }], tables: [
+    T(21, 'square', 260, 160, 6, 'served', 5, 2860, 55), T(22, 'square', 420, 160, 4, 'empty'),
+    T(23, 'square', 260, 420, 4, 'cooking', 4, 1540, 18), T(24, 'circle', 780, 200, 4, 'empty'), T(25, 'circle', 960, 380, 4, 'seated', 2, 0, 2)] },
+  '二樓戶外': { obstacles: [{ x: 520, y: 260, w: 100, h: 100, r: '50%', label: '盆栽/圓柱' }], tables: [
+    T(31, 'circle', 260, 160, 2, 'empty'), T(32, 'circle', 570, 160, 2, 'empty'), T(33, 'circle', 880, 160, 4, 'empty'),
+    T(34, 'square', 260, 460, 4, 'empty'), T(35, 'square', 570, 460, 4, 'empty'), T(36, 'circle', 880, 460, 2, 'empty')] },
+  '花園': { obstacles: [], tables: [
+    T(41, 'square', 360, 280, 6, 'cooking', 6, 3320, 26), T(42, 'square', 620, 280, 6, 'seated', 3, 0, 12), T(43, 'circle', 880, 280, 4, 'served', 2, 980, 35),
+    // 第 44–46 桌在初始可視範圍右側外（測試候位開桌自動捲到空桌 R63）
+    T(44, 'square', 1330, 280, 4, 'empty'), T(45, 'circle', 1590, 280, 4, 'empty'), T(46, 'square', 1850, 280, 6, 'empty')] },
+};
+const money = n => '$' + n.toLocaleString();
+// 候位清單假資料（依 Figma「清單很長」）；依排隊順序排列，name、phone 可為空
+// pending 為待確認訂單張數（0 表示沒有）
+const WL = (no, name, people, phone, mins, pending) => ({ no, name, people, phone, mins, pending: !!pending, pendingCount: pending || 0 });
+// 編輯候位：假資料只有合併後的名字與總人數，帶入表單時拆成姓名＋稱謂、人數全算大人
+const splitName = name => { const m = name.match(/^(.+)(先生|小姐)$/); return m ? { first: m[1], title: m[2] } : { first: name, title: '不稱謂' }; };
+const WAITLIST = [
+  WL('001', '張先生', 3, '0933-124-433', 22), WL('002', '李小姐', 2, '0927-323-373', 24, 2),
+  WL('003', '王小姐', 4, '0988-001-927', 22), WL('004', '', 4, '', 22),
+  WL('005', '許小姐', 4, '0938-204-302', 20), WL('006', '吳先生', 2, '0960-533-983', 13, 1),
+  WL('007', '郭先生', 4, '0922-604-793', 10), WL('008', '詹小姐', 6, '0979-433-946', 3),
+];
+// 新增候位：稱謂選項（預設「不稱謂」）、來客數欄位（大人預設 1、必填）
+const WLA_TITLES = ['先生', '小姐', '不稱謂'];
+const WLA_GUESTS = [{ k: 'adults', label: '大人', required: true }, { k: 'kids', label: '小孩' }, { k: 'infants', label: '嬰兒' }];
+// 開桌彈窗：來客數任一欄位為必填時，顧客資料自動展開且不提供收合（R38）
+const TC_GUEST_REQUIRED = WLA_GUESTS.some(g => g.required);
+const WLA_DEFAULT = { title: '不稱謂', adults: 1, kids: 0, infants: 0, error: false, member: null, toast: false, needs: [] };
+// 搜尋會員：假會員資料（第一位依 Figma）與搜尋範圍
+const MEMBERS = [
+  { id: 0, type: 0, level: '一般會員', name: 'HungYu', phone: '0952-183-209' },
+  { id: 1, type: 0, level: '一般會員', name: '林美玲', phone: '0918-552-031' },
+  { id: 2, type: 0, level: '一般會員', name: '陳大文', phone: '0933-870-112' },
+];
+const WLM_SEGS = [{ k: 'all', label: '所有欄位' }, { k: 'phone', label: '電話號碼' }, { k: 'id', label: '會員編號' }];
+const ICON_LIST = '<svg width="26" height="16" viewBox="0 0 26 16" fill="currentColor"><rect y="0" width="2.5" height="1.5"/><rect x="5" y="0" width="21" height="1.5"/><rect y="4.83" width="2.5" height="1.5"/><rect x="5" y="4.83" width="21" height="1.5"/><rect y="9.66" width="2.5" height="1.5"/><rect x="5" y="9.66" width="21" height="1.5"/><rect y="14.49" width="2.5" height="1.5"/><rect x="5" y="14.49" width="21" height="1.5"/></svg>';
+const ICON_MEMBER_SEARCH = '<svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7.5" cy="7.5" r="5.7"/><path d="M11.8 11.8l4.4 4.4"/></svg>';
+// 會員資料（R65）：工具列圖示（依截圖：重新整理、獎章、儲值、廣播、鑰匙、分享）與地址列地圖釘
+const MI_ICONS = [
+  '<svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 13a7.5 7.5 0 1 1-2.6-5.7"/><path d="M18.5 3.5v4.3h-4.3"/></svg>',
+  '<svg width="26" height="30" viewBox="0 0 26 30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M6 2h4v9l-2 1.5L6 11zM11 2h4v8.5l-2 1-2-1zM16 2h4v9l-2 1.5-2-1.5z"/><path d="M13 13.5l2.6 5.2 5.7.8-4.1 4 1 5.7-5.2-2.7-5.2 2.7 1-5.7-4.1-4 5.7-.8z"/></svg>',
+  '<svg width="34" height="34" viewBox="0 0 34 34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="17" cy="17" r="15.5"/><path d="M21.5 11.5c-.9-1.4-2.6-2.1-4.5-2.1-2.5 0-4.4 1.3-4.4 3.3s1.9 2.9 4.4 3.5 4.6 1.5 4.6 3.6-1.9 3.4-4.6 3.4c-2 0-3.8-.9-4.7-2.4M17 6.5v21" stroke-width="2.2"/></svg>',
+  '<svg width="34" height="26" viewBox="0 0 34 26" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M3 10h6l16-7v20L9 16H3z"/><path d="M9 10v6M25 3v20M28 9.5a3.5 3.5 0 0 1 0 7M6 16l2 6h4l-1.5-5.2"/></svg>',
+  '<svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="6.5"/><circle cx="7" cy="7" r="1.6"/><path d="M13.6 13.6L27 27M20 20l2.6-2.6M23.5 23.5l2.6-2.6"/></svg>',
+  '<svg width="24" height="28" viewBox="0 0 24 28" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10H3.5v16h17V10H16"/><path d="M12 2v15M7.5 6.5L12 2l4.5 4.5"/></svg>',
+];
+const MI_PIN = '<svg class="mi-pin" width="30" height="28" viewBox="0 0 30 28" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M15 22s-7-7-7-12a7 7 0 0 1 14 0c0 5-7 12-7 12z"/><circle cx="15" cy="10" r="2.6"/><path d="M10 18.5H5.5L2 26.5h26l-3.5-8H20"/></svg>';
+// 會員資料的會員編號：未修改過的會員依手機產生，修改後固定為修改前的值
+const memberNo = m => m.no || `PH_${m.phone.replace(/\D/g, '')}_1791796006`;
+// 手機號碼排成 0912-345-678
+const formatPhone = v => { const d = v.replace(/\D/g, '').slice(0, 10); return d.slice(0, 4) + (d.length > 4 ? '-' + d.slice(4, 7) : '') + (d.length > 7 ? '-' + d.slice(7) : ''); };
+const ICON_CHEVRON = '<svg class="wla-link-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6l6 6-6 6"/></svg>';
+const ICON_MINUS = '<svg width="17" height="17" viewBox="0 0 17 17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.5 8.5h12"/></svg>';
+const ICON_PLUS = '<svg width="17" height="17" viewBox="0 0 17 17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.5 8.5h12M8.5 2.5v12"/></svg>';
+// Figma 匯出的 icon/refresh（白色、70% 透明度）
+const ICON_REFRESH = 'data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxnIGlkPSJpY29uL3JlZnJlc2giIG9wYWNpdHk9IjAuNyI+CjxnIGlkPSJsaW5lIj4KPHBhdGggaWQ9IkFycm93aGVhZCIgZD0iTTEwIDEwTDEzLjUgNi4wMDAwMUwxMCAyLjUwMDAxIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjEuMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CjxwYXRoIGlkPSJSaW5nIiBkPSJNMTggMTIuNUMxOCAxNS4yNDA4IDE2LjI4MDcgMTcuNjg3IDEzLjcwMTggMTguNjE1NEMxMS4xMjMgMTkuNTQzOCA4LjIzODgyIDE4Ljc1NDggNi40OTE3IDE2LjY0M0M0Ljc0NDU5IDE0LjUzMTIgNC41MDk5OSAxMS41NTA1IDUuOTA1MjIgOS4xOTE0MUM3LjMwMDQ1IDYuODMyMzIgMTAuMDI1NiA1LjYwMTkgMTIuNzE4IDYuMTE1NDciIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMS4yIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPC9nPgo8L2c+Cjwvc3ZnPgo=';
+// 出餐中、已出餐的桌卡顯示的一般訂單（依 Figma 假資料，品項同上；不計入桌位金額）
+const PAID_ORDER = { status: '已付清', name: 'Olivia', phone: '0988-000-112', note: '不加牛奶', items: PENDING_ORDER };
+// Figma 匯出的 icon/refresh（白色、不透明；一般訂單卡用）
+const ICON_REFRESH_SOLID = 'data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxnIGlkPSJpY29uL3JlZnJlc2giPgo8ZyBpZD0ibGluZSI+CjxwYXRoIGlkPSJBcnJvd2hlYWQiIGQ9Ik0xMCAxMEwxMy41IDYuMDAwMDFMMTAgMi41MDAwMSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIxLjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8cGF0aCBpZD0iUmluZyIgZD0iTTE4IDEyLjVDMTggMTUuMjQwOCAxNi4yODA3IDE3LjY4NyAxMy43MDE4IDE4LjYxNTRDMTEuMTIzIDE5LjU0MzggOC4yMzg4MiAxOC43NTQ4IDYuNDkxNyAxNi42NDNDNC43NDQ1OSAxNC41MzEyIDQuNTA5OTkgMTEuNTUwNSA1LjkwNTIyIDkuMTkxNDFDNy4zMDA0NSA2LjgzMjMyIDEwLjAyNTYgNS42MDE5IDEyLjcxOCA2LjExNTQ3IiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjEuMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CjwvZz4KPC9nPgo8L3N2Zz4K';
+// 空桌桌卡（一般掃碼點餐）：開桌前的暫存資料；大人預設 1；進階設定的開關只在這次開啟有效
+const TC_OPEN_TOGGLES = [
+  [{ k: 'selfGuests', label: '消費者自行設定來客數' }, { label: '低消限制', val: '消費金額', link: true }, { label: '消費金額', val: '依來客數 $300/人', link: true }, { k: 'allowUnderMin', label: '未達低消允許送出訂單' }],
+  [{ label: '連結有效時間（分鐘）', val: '無限制' }, { k: 'needConfirm', label: '訂單需店內確認' }, { k: 'paidNoConfirm', label: '已付款訂單不需確認' }, { k: 'singleUse', label: '限單次使用' }],
+  [{ label: '送單時間間隔（分鐘）', val: '無限制' }, { label: '每次送單數量上限（桌）', val: '無限制' }],
+];
+const TC_OPEN_FEES = ['服務費百分比（%）', '折扣比率', '折扣金額'];
+const TC_OPEN_DEFAULT = () => ({ expanded: TC_GUEST_REQUIRED, adv: false, title: '不稱謂', adults: 1, kids: 0, infants: 0, member: null, needs: [], toggles: { selfGuests: true, allowUnderMin: true, needConfirm: true, paidNoConfirm: true, singleUse: false } });
+// 低消：依來客數每人 $300（依 Figma 進階設定）
+const TC_MIN_PER_GUEST = 300;
+// Figma 匯出的 icon/arrow_down（#0092B1；收合時旋轉 180°）
+const ICON_ARROW_DOWN = 'data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjIwIiBoZWlnaHQ9IjIwIiB2aWV3Qm94PSIwIDAgMjAgMjAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxnIGlkPSJpY29uL2Fycm93X2Rvd24iPgo8cGF0aCBpZD0iVW5pb24iIGQ9Ik00LjYyNSA4Ljc5NDU1TDUuMzMxNjUgOC4wODc5MUwxMC4xNDAxIDEyLjg5NjNMMTQuOTUwMiA4LjA4NjE4TDE1LjY1NjkgOC43OTI4M0wxMC4xNDAxIDE0LjMwOTZMNC42MjUgOC43OTQ1NVoiIGZpbGw9IiMwMDkyQjEiLz4KPC9nPgo8L3N2Zz4K';
+// 候位左滑操作按鈕圖示（依 Figma icon/edit、icon/printer、icon/trash）
+const ICON_SWIPE_EDIT = '<svg width="28" height="28" viewBox="0 0 28 28" fill="currentColor"><path d="M14 6.5332L9.33301 6.53223C7.78684 6.53227 6.53351 7.7869 6.5332 9.33301V18.666C6.53323 20.2124 7.78666 21.4668 9.33301 21.4668H18.667C20.2131 21.4665 21.4678 20.2122 21.4678 18.666L21.4668 14H22.8662V18.666C22.8662 20.9856 20.9856 22.8662 18.666 22.8662L9.33301 22.8652C7.01346 22.8652 5.13381 20.9856 5.13379 18.666V9.33301C5.13398 7.0136 7.01356 5.13383 9.33301 5.13379H13.999L14 6.5332ZM19.8965 5.21289C20.0818 5.213 20.2595 5.28602 20.3906 5.41699L22.7881 7.81348C23.0609 8.08689 23.0613 8.53054 22.7881 8.80371L14.1006 17.4902C14.003 17.5878 13.8784 17.6545 13.7432 17.6816L10.748 18.2813C10.5187 18.3271 10.2797 18.2551 10.1143 18.0898C9.94906 17.9244 9.87806 17.6863 9.92383 17.457L10.5234 14.4619C10.5506 14.3265 10.6172 14.2022 10.7148 14.1045L19.4014 5.41699C19.5326 5.28572 19.7108 5.21289 19.8965 5.21289ZM11.8545 14.9434L11.5039 16.7012L13.2617 16.3496L19.6533 9.95801L18.2461 8.55078L11.8545 14.9434ZM19.2354 7.56152L20.6426 8.96875L21.3027 8.30762L19.8965 6.90137L19.2354 7.56152Z"/></svg>';
+const ICON_SWIPE_PRINT = '<svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9.625 19.8333H5.25V11.6667H22.75V19.8333H18.375" stroke-linejoin="round"/><rect x="9.45" y="16.45" width="9.1" height="6.1833" rx="0.4667" stroke-linejoin="round"/><path d="M8.16667 11.6667V4.66667H15.75L19.25 8.75V11.6667"/><circle cx="17.5" cy="14.2333" r="0.933333" fill="currentColor" stroke="none"/></svg>';
+const ICON_SWIPE_TRASH = '<svg width="28" height="28" viewBox="0 0 28 28" fill="currentColor"><path d="M17.7331 8.05H23.3337V9.44941H21.1774L20.0104 23.4494H7.98991L6.82292 9.44941H4.66667V8.05H10.2673V4.55H17.7331V8.05ZM9.27702 22.05H18.7233L19.7731 9.44941H8.22721L9.27702 22.05ZM12.8327 18.8996H11.4342V12.5998H12.8327V18.8996ZM16.5661 18.8996H15.1667V12.5998H16.5661V18.8996ZM11.6667 8.05H16.3327V5.94941H11.6667V8.05Z"/></svg>';
+const ICON_INFO = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="8.25"/><path d="M12 7.75v5"/><circle cx="12" cy="16" r=".6" fill="currentColor"/></svg>';
+const ICON_BACK = '<svg width="12" height="20" viewBox="0 0 12 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2L2 10l8 8"/></svg>';
+const ICON_TAG_ADD = '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 10h12M10 4v12"/></svg>';
+const ICON_TAG_REMOVE = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+// 標籤：桌位本身的設施，換桌、合併時留在原桌不跟訂單移動；一樓除第 3 桌外都有嬰兒椅（對應 Figma「本區 8 桌符合」）
+const TAGS = ['輪椅', '嬰兒椅'];
+const TABLE_TAGS = {
+  1: ['輪椅', '嬰兒椅'], 2: ['嬰兒椅'], 4: ['輪椅', '嬰兒椅'], 5: ['嬰兒椅'], 6: ['嬰兒椅'], 7: ['嬰兒椅'], 8: ['輪椅', '嬰兒椅'], 9: ['嬰兒椅'],
+  21: ['輪椅', '嬰兒椅'], 22: ['輪椅'], 23: ['嬰兒椅'], 24: ['輪椅'], 33: ['輪椅'], 41: ['嬰兒椅'], 42: ['輪椅', '嬰兒椅'],
+};
+const hasTags = (t, tags) => tags.every(g => (TABLE_TAGS[t.id] || []).includes(g));
+// 座位數篩選（單選，依 Figma「桌容篩選」）：依桌位座位數比對範圍
+const SEAT_RANGES = [
+  { k: '1-2', label: '1-2人', min: 1, max: 2 }, { k: '3-4', label: '3-4人', min: 3, max: 4 },
+  { k: '5-6', label: '5-6 人', min: 5, max: 6 }, { k: '7+', label: '7人以上', min: 7, max: Infinity },
+];
+const fitsSeat = (t, k) => { const r = k && SEAT_RANGES.find(x => x.k === k); return !r || (t.cap >= r.min && t.cap <= r.max); };
+// 佔桌計時模式：用餐時限（假資料，分鐘）；剩餘時間＝時限－用餐分鐘數，超過時限顯示「超 N 分」
+const TABLE_TIME_LIMIT = 60;
+// 座位圖顯示設定選單（依 Figma「佔桌計時模式」）；訂單抬頭顯示格式目前只做顯示，不影響畫面
+const TIMER_MODES = [{ k: 'remain', label: '桌位剩餘使用時間' }, { k: 'used', label: '桌位已使用時間' }];
+const HEADER_FORMATS = [{ k: 'table', label: '桌號' }, { k: 'total', label: '訂單總價' }, { k: 'orderNo', label: '訂單編號' }];
+// 虛線平均分布：一圈長度不一定是「線段＋間隔」的整數倍，照抄間隔會在起點留下過窄的接縫；
+// 改為依一圈長度算出可放幾段（四捨五入），線段長度不變、間隔微調平均分配；
+// 圖形另設 pathLength 為同一長度，避免瀏覽器量測圓弧長度的誤差又產生小接縫
+const cssDash = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim().split(/\s+/).map(Number);
+const evenDash = (name, perimeter) => {
+  const [dash, gap] = cssDash(name), n = Math.max(1, Math.round(perimeter / (dash + gap)));
+  return `${dash} ${(perimeter / n - dash).toFixed(3)}`;
+};
+// 空桌虛線框：沿桌緣內側 1px 畫 2px 線（等同 Figma 內側框線），圓桌畫圓、方桌圓角 8px
+const tableDash = (size, radius) => {
+  const w = size - 2, r = radius === '50%' ? w / 2 : 7;
+  const perimeter = 4 * (w - 2 * r) + 2 * Math.PI * r;
+  return `<svg class="table-dash" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="stroke-dasharray:${evenDash('--bd-table-empty-dash', perimeter)}"><rect x="1" y="1" width="${w}" height="${w}" rx="${r}" ry="${r}" pathLength="${perimeter}"/></svg>`;
+};
+const ICON_CLOCK = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8.5" r="5.3"/><path d="M8 5.8v2.9l-1.8 1.2"/></svg>';
+const ICON_ALARM = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8.8" r="4.8"/><path d="M8 6.6v2.4l1.5 1M2.8 4.4l2-1.7M13.2 4.4l-2-1.7"/></svg>';
+// Figma icon/swap（20px）：原始路徑，置中於 20×20
+const ICON_SWAP = '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(4.1667 4.0833)"><path d="M0.5 3H11.1667"/><path d="M8.66667 0.5L11.1667 3L8.66667 5.5"/><path d="M0.5 8.83333H11.1667"/><path d="M3 6.33333L0.5 8.83333L3 11.3333"/></g></svg>';
+// 「本桌會員」卡片：顯示目前帶入的會員（前綴標來源），下方「⇄ 更改成 會員{另一位}」切換；choices 固定兩位，index 0 為本桌目前會員（預設）
+const memberSwap = (choices, sel, act) => {
+  if (!choices.length) return '';
+  const c = choices[sel], o = choices[1 - sel];
+  return `<div><div class="wla-subtitle">設定本桌會員</div><div class="wla-card mv-member">` +
+    `<div class="mv-member-row"><div class="mv-member-info"><div class="mv-member-from">${c.from}</div><div class="mv-member-name"><span>${c.name}</span><span>${c.phone}</span></div></div></div>` +
+    `<div class="mv-member-swap" data-act="${act}" data-i="${1 - sel}">${ICON_SWAP}<span>更改成 會員${o.name}</span></div>` +
+  `</div></div>`;
+};
+const ICON_CHECK = '<svg width="18" height="13" viewBox="0 0 18 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 6.8l4.8 4.7L16.5 1.5"/></svg>';
+const ICON_MENU_BACK = '<svg width="8" height="13" viewBox="0 0 8 13" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 1.5l-5 5 5 5"/></svg>';
+const ICON_MENU_NEXT = '<svg class="settings-chevron" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6.5l5.5 5.5-5.5 5.5"/></svg>';
+// 候位清單面板右緣距「候位」按鈕左緣（依 Figma）
+const WL_GAP = 13;
+const ICON_SEARCH = '<svg class="wl-search-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7.5" cy="7.5" r="5.7"/><path d="M11.8 11.8l4.4 4.4"/></svg>';
+
+const $ = id => document.getElementById(id);
+// 內容有變才重寫，避免每次 render 重建 DOM
+const html = (el, s) => { if (el._html !== s) { el.innerHTML = s; el._html = s; } };
+// 樣式有變才寫入
+const setStyle = (el, styles) => { const key = JSON.stringify(styles); if (el._style !== key) { Object.assign(el.style, styles); el._style = key; } };
+
+class Component {
+  state = { floor: '一樓', data: JSON.parse(JSON.stringify(FLOORS)), drag: null, press: null, popover: null, toast: null, move: null, filter: null, waitlist: null, wlQuery: '', wlData: WAITLIST.map(w => ({ ...w })), wlAdd: null, wlMember: null, memberInfo: null, wlSwipe: null, wlCancel: null, clearAsk: null, card: null, cardOpen: null, cardToast: false, settings: null, tagMenu: false, needsPool: null, seat: null, seatLeave: null, swap: null, leaveAsk: null, tags: [], seatFilter: null, seatMenu: false, timerMode: null, headerFmt: 'table', scale: 1, safeTopPx: 0, screenH: SCREEN_MAX_H, viewH: SCREEN_MAX_H - CHROME_H - TABS_H, pan: { x: 0, y: 0 } };
+  floorRef = { current: $('floor') };
+
+  setState(patch) {
+    const p = typeof patch === 'function' ? patch(this.state) : patch;
+    this.state = { ...this.state, ...p };
+    this.render();
+  }
+
+  componentDidMount() {
+    // 系統狀態列高度（主畫面模式延伸到狀態列底下時才大於 0）
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;top:0;visibility:hidden;padding-top:env(safe-area-inset-top)';
+    document.body.appendChild(probe);
+    this.fit = () => {
+      const safeTop = parseFloat(getComputedStyle(probe).paddingTop) || 0;
+      // 主畫面模式全螢幕寬時，至少取螢幕高度（保險用：iPad 11 吋 iPadOS 26 實測 innerHeight 已等於螢幕高度 820）
+      let availH = innerHeight;
+      if (navigator.standalone && innerWidth >= Math.max(screen.width, screen.height) - 1) availH = Math.max(availH, Math.min(screen.width, screen.height));
+      // html、body、.stage 都設為鋪滿高度（100% 在主畫面模式會依 clientHeight 788 計算，body 的 overflow:hidden 會裁掉超出部分）
+      [document.documentElement, document.body, document.querySelector('.stage')].forEach(el => el.style.height = availH + 'px');
+      // 畫面高度上下限只算狀態列以下的內容
+      let scale = Math.min(1, innerWidth / W), contentH = Math.min(SCREEN_MAX_H, (availH - safeTop) / scale);
+      if (contentH < SCREEN_MIN_H) { contentH = SCREEN_MIN_H; scale = (availH - safeTop) / SCREEN_MIN_H; }
+      const safeTopPx = safeTop / scale;
+      // 桌位圖可視高度：viewH 為顯示底部頁籤列時，拖曳中再加上頁籤列高度
+      this.setState({ scale, safeTopPx, screenH: safeTopPx + contentH, viewH: contentH - CHROME_H - TABS_H });
+      this.setPan(this.state.pan.x, this.state.pan.y);
+    };
+    this.fit(); addEventListener('resize', this.fit);
+
+    // 對應原模板中各元素的 pointerdown：桌位 → onDown（並 stopPropagation）；
+    // Popover → stop；其餘落在桌位圖上 → onFloorDown
+    this.floorRef.current.addEventListener('pointerdown', e => {
+      this.stopAutoPan();
+      const v = this.vals;
+      const tableEl = e.target.closest('.table');
+      if (tableEl) return v.tables[+tableEl.dataset.i].onDown(e);
+      if (e.target.closest('[data-stop]')) return v.stop(e);
+      v.onFloorDown();
+      this.panDown(e);
+    });
+    // 滑鼠滾輪／觸控板平移畫布
+    // 每幀最多套用一次，累積期間的捲動量
+    this.wheel = { dx: 0, dy: 0, raf: null };
+    this.floorRef.current.addEventListener('wheel', e => {
+      e.preventDefault();
+      if (this.state.drag) return;
+      this.stopAutoPan();
+      const unit = e.deltaMode === 1 ? 16 : 1, w = this.wheel;
+      w.dx += e.deltaX * unit; w.dy += e.deltaY * unit;
+      if (w.raf) return;
+      w.raf = requestAnimationFrame(() => {
+        const k = W / this.measure().width, { pan } = this.state;
+        this.setPan(pan.x + w.dx * k, pan.y + w.dy * k, { popover: null });
+        w.dx = w.dy = 0; w.raf = null;
+      });
+    }, { passive: false });
+    // 桌卡：點桌開啟時，瀏覽器會在手指位置補送 click，可能落在剛出現的遮罩或按鈕上；
+    // 開啟後要先在桌卡（含遮罩、提示列）上重新按下，裡面的 click 才生效
+    $('tableCard').addEventListener('pointerdown', () => { this.cardArmed = true; }, true);
+    $('tableCard').addEventListener('click', e => {
+      if (!this.cardArmed) { e.stopPropagation(); e.preventDefault(); }
+    }, true);
+    // 換桌視窗同理：拖曳放開或點桌開啟時補送的 click 可能落在遮罩上而立刻關閉（iPad 主畫面模式實測會閃一下），開啟後要重新按下才生效
+    $('moveDialog').addEventListener('pointerdown', () => { this.mvArmed = true; }, true);
+    $('moveDialog').addEventListener('click', e => {
+      if (!this.mvArmed) { e.stopPropagation(); e.preventDefault(); }
+    }, true);
+    // 對應原模板中各元素的 click
+    $('screen').addEventListener('click', e => {
+      // 左滑放開時瀏覽器仍會送出 click：略過這一次，避免剛滑開就被收回
+      if (this.wlSwipeEnded) { this.wlSwipeEnded = false; return; }
+      // 有候位列滑開時，點操作按鈕以外的地方先收回（上方有編輯視窗、搜尋會員或 Alert 時不處理）
+      const st = this.state;
+      if (st.wlSwipe && !st.wlCancel && !st.wlAdd && !st.wlMember && !e.target.closest('.wl-action, [data-act="wlSeat"]')) { this.setState({ wlSwipe: null }); return; }
+      const el = e.target.closest('[data-act]');
+      if (!el) return;
+      const v = this.vals, i = +el.dataset.i;
+      ({
+        floor: () => v.floors[i].onClick(),
+        chip: () => v.chips[i].onClick(),
+        open: () => v.popover.onOpen(),
+        mvToggle: () => { const m = this.state.move, no = el.dataset.no === 'p' ? 'p' : +el.dataset.no; this.setState({ move: { ...m, sel: m.sel.includes(no) ? m.sel.filter(x => x !== no) : [...m.sel, no] } }); },
+        mvCancel: () => this.setState({ move: null }),
+        mvPick: () => this.confirmPick(),
+        mvCapConfirm: () => this.mergeAll(this.state.move.from, this.state.move.to, this.state.move.member),
+        mvMember: () => this.setState({ move: { ...this.state.move, member: i } }),
+        mvStep: () => this.stepMoveGuest(el.dataset.k, +el.dataset.d),
+        mvPartialConfirm: () => this.movePartial(),
+        waitlist: () => this.openWaitlist(),
+        settings: () => this.setState({ settings: this.state.settings ? null : 'root' }),
+        settingsPage: () => this.setState({ settings: el.dataset.p }),
+        // 再點已勾選的計時模式即取消，兩項都不勾就不顯示時間
+        timerMode: () => this.setState({ timerMode: this.state.timerMode === el.dataset.k ? null : el.dataset.k }),
+        headerFmt: () => this.setState({ headerFmt: el.dataset.k }),
+        tagMenu: () => this.setState({ tagMenu: !this.state.tagMenu }),
+        // 清除條件：一次清除桌況篩選、標籤與座位數，選單開著也一併關閉
+        // 座位數單選：點選項即選取並關閉選單；再點已選的項目取消
+        seatMenu: () => this.setState({ seatMenu: !this.state.seatMenu }),
+        seatPick: () => { this.setState({ seatFilter: this.state.seatFilter === el.dataset.k ? null : el.dataset.k, seatMenu: false }); this.reseek(); },
+        clearFilters: () => { this.setState({ filter: null, tags: [], tagMenu: false, seatFilter: null, seatMenu: false }); this.reseek(); },
+        // 標籤可複選，依選單順序排列；再點一次取消勾選
+        tag: () => { const g = el.dataset.t, cur = this.state.tags; this.setState({ tags: TAGS.filter(x => x === g ? !cur.includes(x) : cur.includes(x)) }); this.reseek(); },
+        closeWaitlist: () => this.closeWaitlist(),
+        wlaOpen: () => this.setState({ wlAdd: { ...WLA_DEFAULT } }),
+        wlaEdit: () => this.editWaitlist(el.dataset.no),
+        wlaCancel: () => this.setState({ wlAdd: null, wlSwipe: null }),
+        wlaTitle: () => this.setState({ wlAdd: { ...this.state.wlAdd, title: el.dataset.t } }),
+        wlaStep: () => this.stepGuest(el.dataset.k, +el.dataset.d),
+        wlaSubmit: () => this.submitWaitlist(),
+        wlmOpen: () => this.setState({ wlMember: { seg: 'all', query: '' } }),
+        wlmCancel: () => this.setState({ wlMember: null }),
+        // 會員資料（R65）：點會員卡片左側資訊開啟；data-from 為 wla（新增／編輯候位）或 card（桌卡）；點遮罩關閉
+        memInfoOpen: () => this.setState({ memberInfo: { from: el.dataset.from, member: el.dataset.from === 'wla' ? this.state.wlAdd.member : this.cardForm().member, error: null } }),
+        // 點遮罩：有修改就驗證並儲存，手機有誤時不關閉
+        memInfoClose: () => this.saveMemberInfo(),
+        wlmSeg: () => this.setState({ wlMember: { ...this.state.wlMember, seg: el.dataset.s } }),
+        wlmPick: () => this.applyMember(MEMBERS.find(m => m.id === +el.dataset.id)),
+        wlCancelAsk: () => this.setState({ wlCancel: { no: el.dataset.no } }),
+        wlCancelClose: () => this.setState({ wlCancel: null, wlSwipe: null }),
+        wlCancelConfirm: () => this.cancelWaitlist(this.state.wlCancel.no),
+        wlaUnlink: () => this.setState({ wlAdd: { ...this.state.wlAdd, member: null, toast: false } }),
+        tcClose: () => this.setState({ card: null, cardOpen: null, cardToast: false }),
+        seatMember: () => this.setState({ cardOpen: { ...this.state.cardOpen, member: i } }),
+        // 清桌：先跳 Alert 確認；「取消」只關 Alert，桌卡留著
+        tcClearAsk: () => this.setState({ clearAsk: this.state.card }),
+        tcClearCancel: () => this.setState({ clearAsk: null }),
+        tcClearConfirm: () => this.clearTable(),
+        wlSeat: () => this.startSeat(el.dataset.no),
+        seatCancel: () => this.openWaitlist(),
+        tcSwap: () => this.startSwap(),
+        swapCancel: () => this.cancelSwap(),
+        // 加入待離桌：「取消」只關 Alert（點擊換桌時回到選桌模式）；「清桌後加入」當下即清桌（之後取消也不恢復），再依空桌繼續換桌
+        leaveCancel: () => this.setState({ leaveAsk: null }),
+        leaveConfirm: () => { const a = this.state.leaveAsk; this.setState({ leaveAsk: null, data: this.update(l => this.clear(l.find(x => x.id === a.to))) }); this.drop(a.from, a.to); },
+        // 候位加入待離桌：取消回到選桌模式；清桌後加入 → 當下即清桌，再開啟候位開桌視窗（空桌版本）
+        seatLeaveCancel: () => this.setState({ seatLeave: null }),
+        seatLeaveConfirm: () => { const id = this.state.seatLeave.to; this.cardArmed = false; this.cardStartMember = false; this.setState({ seatLeave: null, popover: null, data: this.update(l => this.clear(l.find(x => x.id === id))), card: id, cardOpen: { ...TC_OPEN_DEFAULT(), seatNo: this.state.seat.no, member: 0 }, cardToast: false }); },
+        tcTitle: () => this.setCardForm({ title: el.dataset.t }),
+        tcStep: () => this.stepCardGuest(el.dataset.k, +el.dataset.d),
+        tcMember: () => this.setState({ wlMember: { seg: 'all', query: '', target: 'card' } }),
+        tcUnlink: () => { this.setCardForm({ member: null }); this.setState({ cardToast: false }); },
+        tcExpand: () => this.setState({ cardOpen: { ...this.state.cardOpen, expanded: !this.state.cardOpen.expanded } }),
+        tcAdv: () => this.setState({ cardOpen: { ...this.state.cardOpen, adv: true } }),
+        tcAdvBack: () => this.setState({ cardOpen: { ...this.state.cardOpen, adv: false } }),
+        tcToggle: () => { const o = this.state.cardOpen, k = el.dataset.k; this.setState({ cardOpen: { ...o, toggles: { ...o.toggles, [k]: !o.toggles[k] } } }); },
+        tcOpenTable: () => this.openTableFromCard(el.dataset.qr === '1'),
+        // 特殊需求標籤（R57）：data-f 為 wla（新增／編輯候位）或 tc（桌卡）；標籤池點一個即加入並關閉
+        needsPool: () => this.setState({ needsPool: this.state.needsPool ? null : el.dataset.f }),
+        needsAdd: () => { const f = this.state.needsPool; this.setNeeds(f, [...this.needsOf(f), el.dataset.t]); this.setState({ needsPool: null }); },
+        needsRemove: () => this.setNeeds(el.dataset.f, this.needsOf(el.dataset.f).filter(x => x !== el.dataset.t)),
+      })[el.dataset.act]();
+    });
+    // 保險：拖曳中又有新的觸控（代表放開的事件遺失、拖曳卡卡在畫面上）→ 取消拖曳，該次觸控不做其他操作
+    $('screen').addEventListener('pointerdown', e => {
+      if (!this.state.drag) return;
+      e.stopPropagation(); e.preventDefault();
+      this.cancelDrag();
+    }, true);
+    document.addEventListener('visibilitychange', () => { if (document.hidden && this.state.drag) this.cancelDrag(); });
+    // 座位圖顯示設定選單：按在選單與設定圖示以外的地方即關閉（該次操作照常進行）
+    $('screen').addEventListener('pointerdown', e => {
+      if (this.state.settings && !e.target.closest('.settings-menu, #settingsBtn')) this.setState({ settings: null });
+      if (this.state.tagMenu && !e.target.closest('.tag-menu, #tagBtn')) this.setState({ tagMenu: false });
+      if (this.state.seatMenu && !e.target.closest('.seat-menu, #seatBtn')) this.setState({ seatMenu: false });
+      if (this.state.needsPool && !e.target.closest('.needs-pool, [data-act="needsPool"]')) this.setState({ needsPool: null });
+    }, true);
+    // 表單捲動時標籤池不跟著移動，直接關閉
+    $('screen').addEventListener('scroll', () => { if (this.state.needsPool) this.setState({ needsPool: null }); }, true);
+    // 候位左滑（按在操作按鈕上不算）
+    $('screen').addEventListener('pointerdown', e => {
+      const row = e.target.closest('.wl-row');
+      if (row && !e.target.closest('.wl-action')) this.swipeDown(e, row);
+    });
+    // 候位清單搜尋：即時篩選
+    $('screen').addEventListener('input', e => {
+      if (e.target.classList.contains('wl-search-input')) this.setState({ wlQuery: e.target.value });
+      // 新增候位：手機號碼即時排版
+      if (e.target.id === 'wlaPhone') e.target.value = formatPhone(e.target.value);
+      if (e.target.id === 'wlmSearch') this.setState({ wlMember: { ...this.state.wlMember, query: e.target.value } });
+      // 會員資料：手機即時排版，修改後清除錯誤
+      if (e.target.id === 'miPhone') {
+        e.target.value = formatPhone(e.target.value);
+        if (this.state.memberInfo.error) this.setState({ memberInfo: { ...this.state.memberInfo, error: null } });
+      }
+      // 桌卡：姓名、手機、備註直接寫回該桌（不需重畫）
+      const tcField = { tcName: 'name', tcPhone: 'phone', tcNote: 'note' }[e.target.id];
+      if (tcField) {
+        if (tcField === 'phone') e.target.value = formatPhone(e.target.value);
+        // 空桌桌卡的輸入留在畫面上，開桌時才讀取
+        const t = this.cardTable();
+        if (t && t.cust) t.cust[tcField] = e.target.value;
+      }
+    });
+  }
+
+  tables() { return this.state.data[this.state.floor].tables; }
+  // 候位清單：面板右緣對齊「候位」按鈕左側 WL_GAP px；開啟時關閉桌位 Popover、清空搜尋
+  openWaitlist() {
+    clearTimeout(this.wlTimer);
+    const right = W - $('waitlistBtn').offsetLeft + WL_GAP;
+    this.stopAutoPan();
+    this.setState({ waitlist: { right, closing: false }, wlQuery: '', popover: null, card: null, wlSwipe: null, swap: null, ...this.seatExit() });
+  }
+  // 離開候位選桌模式：座位數與標籤篩選恢復為進入前的設定
+  seatExit() { const s = this.state.seat; return s ? { seat: null, seatFilter: s.prevSeat, tags: s.prevTags } : {}; }
+  // 候位開桌：關閉候位清單，進入選桌模式（空桌外框呼吸、其他桌淡化、頁籤列隱藏）；
+  // 座位數篩選自動選取來客數合計所在的分類（0 人不選）；候位的特殊需求標籤加入標籤篩選（保留原本已勾的）；離開時恢復進入前的設定
+  startSeat(no) {
+    const w = this.state.wlData.find(x => x.no === no), r = w.people > 0 && SEAT_RANGES.find(x => w.people >= x.min && w.people <= x.max);
+    const { seatFilter, tags } = this.state, needs = w.needs || [];
+    this.closeWaitlist();
+    this.setState({ seat: { no, prevSeat: seatFilter, prevTags: tags }, seatFilter: r ? r.k : seatFilter, tags: TAGS.filter(g => tags.includes(g) || needs.includes(g)), settings: null, wlSwipe: null, popover: null, card: null, cardOpen: null });
+    // 等候位清單滑出（0.25 秒）後再捲，讓使用者看得到畫面移動
+    clearTimeout(this.seekTimer);
+    this.seekTimer = setTimeout(() => this.seekEmpty(), 250);
+  }
+  // 點擊換桌：關閉桌卡，進入換桌選桌模式（同候位選桌：空桌外框呼吸、其他桌淡化、頁籤列隱藏），點空桌即換桌
+  startSwap() {
+    this.setState({ swap: { from: this.state.card }, card: null, cardOpen: null, cardToast: false, popover: null });
+  }
+  // 取消換桌：離開選桌模式，重新開啟來源桌桌卡
+  cancelSwap() {
+    const t = this.tables().find(x => x.id === this.state.swap.from);
+    this.cardArmed = false;
+    this.cardStartMember = !!(t.cust && t.cust.member);
+    this.setState({ swap: null, card: t.id, cardOpen: null, cardToast: false });
+  }
+  seatEntry() { return this.state.seat && this.state.wlData.find(w => w.no === this.state.seat.no); }
+  // R63 候位開桌的「符合條件」：符合篩選列的座位數範圍與標籤（進入時已帶入候位的座位數分類與特殊需求標籤，店員可再調整）、座位數 ≥ 候位人數（人數 0 時不比較）
+  seatFits(t) {
+    const w = this.seatEntry();
+    if (!w) return true;
+    const { seatFilter, tags } = this.state;
+    return fitsSeat(t, seatFilter) && (!w.people || t.cap >= w.people) && hasTags(t, tags);
+  }
+  // 選桌模式中改了篩選條件：依新條件重新捲動
+  reseek() { if (this.state.seat) this.seekEmpty(); }
+  // 候位左滑：橫向移動超過 6px 才算滑動（直向則交給清單捲動）；放開時超過按鈕寬度一半就停在打開狀態
+  swipeDown(e, row) {
+    const OPEN = 288, no = row.dataset.no, item = row.querySelector('.wl-item');
+    const x0 = e.clientX, y0 = e.clientY, base = this.state.wlSwipe === no ? -OPEN : 0;
+    const k = W / $('screen').getBoundingClientRect().width;
+    let mode = null, offset = base;
+    const move = ev => {
+      const dx = (ev.clientX - x0) * k, dy = (ev.clientY - y0) * k;
+      if (!mode) {
+        if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy)) { mode = 'swipe'; item.style.transition = 'none'; }
+        else if (Math.abs(dy) > 6) { mode = 'scroll'; return end(); }
+        else return;
+      }
+      offset = Math.max(-OPEN, Math.min(0, base + dx));
+      item.style.transform = `translateX(${offset}px)`;
+    };
+    const end = () => {
+      removeEventListener('pointermove', move); removeEventListener('pointerup', end); removeEventListener('pointercancel', end);
+      if (mode !== 'swipe') return;
+      item.style.transition = ''; item.style.transform = '';
+      this.wlSwipeEnded = true; setTimeout(() => { this.wlSwipeEnded = false; }, 0);
+      this.setState({ wlSwipe: offset < -OPEN / 2 ? no : null });
+    };
+    addEventListener('pointermove', move); addEventListener('pointerup', end); addEventListener('pointercancel', end);
+  }
+  // 取消候位：關閉 Alert，該列淡出收合後從清單移除（排隊順序與徽章隨之更新）
+  cancelWaitlist(no) {
+    this.setState({ wlCancel: null });
+    const row = document.querySelector(`.wl-row[data-no="${no}"]`);
+    const remove = () => this.setState({ wlData: this.state.wlData.filter(w => w.no !== no), wlSwipe: null });
+    if (!row || matchMedia('(prefers-reduced-motion: reduce)').matches) return remove();
+    row.style.height = row.offsetHeight + 'px';
+    row.offsetHeight; // 先套用目前高度，收合動畫才會從這裡開始
+    row.classList.add('is-removing');
+    row.style.height = '0px';
+    setTimeout(remove, 250);
+  }
+  // 先播放滑出動畫再移除
+  closeWaitlist() {
+    const wl = this.state.waitlist;
+    if (!wl || wl.closing) return;
+    this.setState({ waitlist: { ...wl, closing: true } });
+    this.wlTimer = setTimeout(() => this.setState({ waitlist: null }), 250);
+  }
+  // 依流水號或電話後三碼篩選；「前方還有 N 組」依原排隊順序計算
+  waitlistItems() {
+    const q = this.state.wlQuery.replace(/\D/g, '');
+    return this.state.wlData.map((w, i) => ({ ...w, ahead: i }))
+      .filter(w => !q || w.no.includes(q) || w.phone.replace(/\D/g, '').slice(-3).includes(q));
+  }
+  // 會員資料（R65）：模擬現有會員資料視窗截圖的可見範圍；會員編號、姓名、手機依套用的會員（姓名、手機可直接修改），地址、統一編號、載具條碼沿用截圖假資料
+  renderMemberInfo() {
+    const st = this.state.memberInfo, m = st && st.member;
+    const input = (id, v, ph, type) => `<input class="mi-input" id="${id}" type="${type}"${type === 'tel' ? ' inputmode="numeric"' : ''} placeholder="${ph}" value="${v}">`;
+    const rows = !m ? [] : [
+      ['會員編號', memberNo(m), 'muted'],
+      ['姓名', input('miName', m.name, '請輸入姓名', 'text'), 'input'], ['手機號碼', input('miPhone', m.phone, '請輸入手機號碼', 'tel'), 'phone'], ['電話', ''], ['電子信箱', ''],
+      ['地址', '100 台北市中正區 110', 'pin'], ['生日', '', 'chev'], ['公司名稱', ''],
+      ['統一編號', '000000**'], ['載具條碼', '/HDK01**'],
+    ];
+    html($('memberInfo'), !m ? '' :
+      `<div class="wlm-scrim" data-act="memInfoClose"></div>` +
+      `<div class="mi-panel" id="miPanel">` +
+        `<div class="mi-toolbar">${MI_ICONS.join('')}</div>` +
+        `<div class="mi-section">基本資料</div>` +
+        `<div class="mi-list">${rows.map(([k, v, f]) =>
+          `<div class="mi-row"${f === 'phone' ? ' id="miPhoneRow"' : ''}><div class="mi-row-inner"><span class="mi-label${f === 'input' || f === 'phone' ? ' is-fixed' : ''}">${k}</span>` +
+            (f === 'phone' ? `<span class="slot" id="miPhoneErr"></span>` : '') +
+            (f === 'input' || f === 'phone' ? v : v ? `<span class="mi-value${f === 'muted' ? ' is-muted' : ''}">${v}</span>` : '') +
+            (f === 'pin' ? MI_PIN : '') +
+            (f === 'pin' || f === 'chev' ? ICON_CHEVRON.replace('wla-link-icon', 'mi-chev') : '') +
+          `</div></div>`).join('')}</div>` +
+      `</div>`);
+    if (!m) return;
+    const contentH = this.state.screenH - this.state.safeTopPx, h = Math.min(550, contentH - 40);
+    setStyle($('miPanel'), { top: this.state.safeTopPx + (contentH - h) / 2 + 'px', height: h + 'px' });
+    // 手機空白：整列淺紅底、輸入框內紅字提示「請輸入手機號碼」；不足 10 碼或與其他會員重複：在標題與值之間顯示紅字原因
+    $('miPhoneRow').classList.toggle('is-error', !!st.error);
+    html($('miPhoneErr'), st.error && st.error !== 'empty' ? `<span class="wla-error-text mi-err">${st.error}</span>` : '');
+  }
+  // 會員資料關閉時儲存：沒修改直接關閉；只驗證手機；通過後更新會員主檔，並同步所有樓層的桌位、候位清單與開啟中的表單（同一位會員 id）
+  saveMemberInfo() {
+    const st = this.state.memberInfo, m = st.member, id = m.id;
+    const name = $('miName').value.trim(), phone = $('miPhone').value, digits = phone.replace(/\D/g, '');
+    if (name === m.name && phone === m.phone) { this.setState({ memberInfo: null }); return; }
+    const dup = MEMBERS.find(x => x.id !== id && x.phone === phone);
+    const error = !digits ? 'empty' : digits.length !== 10 ? '手機需為 10 碼' : dup ? `已是會員「${dup.name}」的手機` : null;
+    if (error) { this.setState({ memberInfo: { ...st, error } }); return; }
+    // 會員編號固定為修改前的值，改手機不會跟著變
+    const no = memberNo(m), patch = x => x && x.id === id ? { ...x, no, name, phone } : x;
+    const master = MEMBERS.find(x => x.id === id);
+    if (master) Object.assign(master, { no, name, phone });
+    const data = JSON.parse(JSON.stringify(this.state.data));
+    Object.values(data).forEach(f => f.tables.forEach(t => { if (t.cust && t.cust.member) t.cust.member = patch(t.cust.member); }));
+    const next = { memberInfo: null, data, wlData: this.state.wlData.map(w => w.member && w.member.id === id ? { ...w, name, phone, member: patch(w.member) } : w) };
+    if (this.state.wlAdd) next.wlAdd = { ...this.state.wlAdd, member: patch(this.state.wlAdd.member), toast: st.from === 'wla' ? '已更新會員資料' : this.state.wlAdd.toast };
+    if (this.state.cardOpen) next.cardOpen = { ...this.state.cardOpen, member: patch(this.state.cardOpen.member) };
+    if (st.from === 'card') next.cardToast = '已更新會員資料';
+    clearTimeout(this.wlaToastTimer);
+    this.setState(next);
+    this.wlaToastTimer = setTimeout(() => {
+      if (st.from === 'card') this.setState({ cardToast: false });
+      else if (this.state.wlAdd) this.setState({ wlAdd: { ...this.state.wlAdd, toast: false } });
+    }, 2000);
+  }
+  // 搜尋會員：外框（含搜尋框）只在開啟時建立；分段與結果另外更新
+  renderMemberSearch() {
+    const w = this.state.wlMember;
+    html($('wlMember'), !w ? '' :
+      `<div class="wlm-scrim"></div>` +
+      `<div class="wlm-panel" id="wlmPanel">` +
+        `<div class="wlm-header">` +
+          `<div class="wlm-title-row"><div class="wlm-leading">${ICON_LIST}</div><div class="wlm-title">搜尋會員</div><div class="wlm-trailing" data-act="wlmCancel">取消</div></div>` +
+          `<div class="wlm-tools">` +
+            `<label class="wlm-search">${ICON_MEMBER_SEARCH}<input class="wlm-search-input" id="wlmSearch" type="text" placeholder="搜尋姓名,電話,地址,備註,會員編號,統一編號"></label>` +
+            `<div class="wlm-seg" id="wlmSeg"></div>` +
+          `</div>` +
+        `</div>` +
+        `<div class="wlm-list" id="wlmList"></div>` +
+      `</div>`);
+    if (!w) return;
+    const contentH = this.state.screenH - this.state.safeTopPx, h = Math.min(640, contentH - 40);
+    setStyle($('wlmPanel'), { top: this.state.safeTopPx + (contentH - h) / 2 + 'px', height: h + 'px' });
+    // 分段：未選中的相鄰兩段之間才有分隔線
+    html($('wlmSeg'), WLM_SEGS.map((sg, i) =>
+      (i > 0 && w.seg !== sg.k && w.seg !== WLM_SEGS[i - 1].k ? `<div class="wlm-seg-divider"></div>` : '') +
+      `<div class="wlm-seg-item${w.seg === sg.k ? ' is-active' : ''}" data-act="wlmSeg" data-s="${sg.k}">${sg.label}</div>`).join(''));
+    const res = this.memberResults(), levels = [...new Set(res.map(m => m.level))];
+    html($('wlmList'), !res.length ? `<div class="wlm-empty">找不到符合的會員</div>` : levels.map(lv => {
+      const ms = res.filter(m => m.level === lv);
+      return `<div class="wlm-section">${lv}: ${ms.length}</div>` + ms.map((m, i) =>
+        `<div class="wlm-row" data-act="wlmPick" data-id="${m.id}"><div class="wlm-row-inner">` +
+          `<div class="wlm-row-main">${i + 1}. ${m.phone}</div>` +
+          `<div class="wlm-row-sub">${m.name},（type:${m.type},id:${m.id},name:${m.level}）</div>` +
+        `</div></div>`).join('');
+    }).join(''));
+  }
+
+  // 新增候位：來客數最少 0；大人大於 0 即清除「請設定人數」
+  stepGuest(k, d) {
+    const a = this.state.wlAdd, n = Math.max(0, a[k] + d);
+    this.setState({ wlAdd: { ...a, [k]: n, error: a.error && !(k === 'adults' && n > 0) } });
+  }
+  // 套用會員：關閉搜尋會員，新增候位改顯示會員卡片，並提示「已套用會員資料」2 秒
+  applyMember(member) {
+    clearTimeout(this.wlaToastTimer);
+    // 從桌卡開啟的搜尋會員：套用到桌卡（佔桌記在桌上；空桌記在開桌暫存）
+    if (this.state.wlMember.target === 'card') {
+      this.setState({ wlMember: null, cardToast: true });
+      this.setCardForm({ member });
+      this.wlaToastTimer = setTimeout(() => this.setState({ cardToast: false }), 2000);
+      return;
+    }
+    this.setState({ wlMember: null, wlAdd: { ...this.state.wlAdd, member, toast: true } });
+    this.wlaToastTimer = setTimeout(() => { if (this.state.wlAdd) this.setState({ wlAdd: { ...this.state.wlAdd, toast: false } }); }, 2000);
+  }
+  // 搜尋會員：所有欄位比對姓名、電話、會員編號；電話號碼、會員編號只比對該欄（數字部分）
+  memberResults() {
+    const { seg, query } = this.state.wlMember, q = query.trim().toLowerCase(), d = q.replace(/\D/g, '');
+    if (!q) return MEMBERS;
+    const phone = m => d && m.phone.replace(/\D/g, '').includes(d), id = m => d && String(m.id).includes(d);
+    return MEMBERS.filter(m => seg === 'phone' ? phone(m) : seg === 'id' ? id(m) : m.name.toLowerCase().includes(q) || phone(m) || id(m));
+  }
+  // 編輯候位：沿用新增候位視窗並帶入該筆資料；用會員加入的顯示會員卡片（姓名、手機欄位留空，清除後再填）
+  editWaitlist(no) {
+    const w = this.state.wlData.find(x => x.no === no);
+    const { first, title } = w.first !== undefined ? w : splitName(w.name);
+    this.wlaPrefill = { name: w.member ? '' : first, phone: w.member ? '' : w.phone, note: w.note || '' };
+    this.setState({ wlAdd: { ...WLA_DEFAULT, editNo: no, title, adults: w.adults ?? w.people, kids: w.kids || 0, infants: w.infants || 0, member: w.member || null, needs: w.needs || [], startWithMember: !!w.member } });
+  }
+  // 大人為 0 時顯示錯誤不關閉；新增：加到清單最後（流水號接續、已等 0 分），清空搜尋並捲到最底；
+  // 編輯：原地更新（流水號、排隊位置、已等分鐘、待確認訂單不變）
+  submitWaitlist() {
+    const a = this.state.wlAdd;
+    if (a.adults === 0) { this.setState({ wlAdd: { ...a, error: true } }); return; }
+    const list = this.state.wlData, first = $('wlaName').value.trim(), people = a.adults + a.kids + a.infants;
+    // 有套用會員時改用會員姓名與電話（不加稱謂）
+    const fields = {
+      name: a.member ? a.member.name : first && a.title !== '不稱謂' ? first + a.title : first,
+      phone: a.member ? a.member.phone : $('wlaPhone').value, people,
+      first, title: a.title, adults: a.adults, kids: a.kids, infants: a.infants, note: $('wlaNote').value.trim(), member: a.member, needs: a.needs,
+    };
+    if (a.editNo) {
+      this.setState({ wlData: list.map(w => w.no === a.editNo ? { ...w, ...fields } : w), wlAdd: null, wlSwipe: null });
+      return;
+    }
+    const no = String(Math.max(0, ...list.map(w => +w.no)) + 1).padStart(3, '0');
+    const item = { ...WL(no, fields.name, people, fields.phone, 0), ...fields };
+    this.setState({ wlData: [...list, item], wlAdd: null, wlQuery: '' });
+    const search = document.querySelector('.wl-search-input');
+    if (search) search.value = '';
+    $('wlList').scrollTop = $('wlList').scrollHeight;
+  }
+  cardTable() { return this.tables().find(t => t.id === this.state.card); }
+  // 特殊需求標籤（R57）：wla 讀寫新增／編輯候位暫存，tc 讀寫桌卡表單（佔桌記在該桌、空桌記在開桌暫存）
+  needsOf(f) { return f === 'wla' ? this.state.wlAdd.needs : this.cardForm().needs; }
+  setNeeds(f, needs) { if (f === 'wla') this.setState({ wlAdd: { ...this.state.wlAdd, needs } }); else this.setCardForm({ needs }); }
+  needsHTML(f, needs) {
+    return (needs.length < TAGS.length ? `<span class="wla-tag wla-tag-add" data-act="needsPool" data-f="${f}">${ICON_TAG_ADD}加入標籤</span>` : '') +
+      needs.map(g => `<span class="wla-tag">${g}<span class="wla-tag-x" data-act="needsRemove" data-f="${f}" data-t="${g}">${ICON_TAG_REMOVE}</span></span>`).join('');
+  }
+  // 桌卡表單資料：佔桌讀寫該桌的 cust（大人＝入座人數－小孩－嬰兒）；空桌讀寫開桌暫存
+  cardForm() {
+    const t = this.cardTable(), o = this.state.cardOpen;
+    if (o) return { title: o.title, member: o.member, adults: o.adults, kids: o.kids, infants: o.infants, needs: o.needs };
+    const c = t.cust;
+    return { title: c.title, member: c.member, adults: (t.guests ?? 0) - c.kids - c.infants, kids: c.kids, infants: c.infants, needs: c.needs || [] };
+  }
+  setCardForm(patch) {
+    if (this.state.cardOpen) { this.setState({ cardOpen: { ...this.state.cardOpen, ...patch } }); return; }
+    const id = this.state.card;
+    this.setState({ data: this.update(l => Object.assign(l.find(x => x.id === id).cust, patch)) });
+  }
+  // 桌卡來客數：佔桌大人最少 1（必填）、開桌彈窗大人可減到 0（送出時才檢核）；小孩與嬰兒最少 0；
+  // 佔桌的入座人數＝三者合計，桌位上的人數即時更新
+  stepCardGuest(k, d) {
+    const f = this.cardForm(), o = this.state.cardOpen;
+    if (k === 'adults' ? f.adults + d < (o ? 0 : 1) : f[k] + d < 0) return;
+    // 大人加到 1 以上即清除「請設定人數」
+    if (o) { this.setCardForm({ [k]: f[k] + d, error: o.error && !(k === 'adults' && f.adults + d > 0) }); return; }
+    const t = this.cardTable();
+    this.setState({ data: this.update(l => {
+      const x = l.find(x => x.id === t.id);
+      x.guests = (x.guests ?? 0) + d;
+      if (k !== 'adults') x.cust[k] += d;
+    }) });
+  }
+  // 空桌桌卡「開桌」「掃碼開桌」：變為佔桌並帶入表單資料（掃碼開桌另提示已列印 QR Code，實際不列印）
+  openTableFromCard(qr) {
+    const t = this.cardTable(), o = this.state.cardOpen;
+    if (o.seatNo) return this.seatTable(t, qr);
+    // 必填的大人為 0：不送出，大人列標示錯誤並捲到該欄（來客數在最上方）
+    if (o.adults === 0) {
+      this.setCardForm({ error: true });
+      const body = document.querySelector('#tcPanel .tc-body.is-main');
+      if (body) body.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      return;
+    }
+    const cust = { ...TC_CUST($('tcPhone').value), name: $('tcName').value.trim(), title: o.title, kids: o.kids, infants: o.infants, note: $('tcNote').value, member: o.member, needs: [] };
+    this.setState({ card: null, cardOpen: null, cardToast: false, data: this.update(l => Object.assign(l.find(x => x.id === t.id),
+      { status: 'seated', guests: o.adults + o.kids + o.infants, mins: 0, orderNo: '#A' + (1040 + t.id * 7), cust })) });
+    this.showToast(`${t.name}已開桌${qr ? '，已列印 QR Code' : ''}`);
+    this.landOn(t.id);
+  }
+  // 清桌（確認清桌）：該桌變空桌，訂單、顧客資料、待確認標記一併清除（標籤留在桌上），關閉 Alert 與桌卡
+  clearTable() {
+    const t = this.cardTable();
+    this.setState({ clearAsk: null, card: null, cardOpen: null, cardToast: false, data: this.update(l => this.clear(l.find(x => x.id === t.id))) });
+    this.showToast(`${t.name}已清桌`);
+  }
+  // 候位開桌：該桌變佔桌，帶入候位的顧客資料（姓名、稱謂、手機、小孩、嬰兒、備註、會員）；
+  // 有待確認訂單時移轉到桌位（加上待確認標記）；從候位清單移除並離開選桌模式
+  seatTable(t, qr) {
+    if (t.status !== 'empty') return this.seatJoin(t, qr);
+    const w = this.seatEntry(), { first, title } = w.first !== undefined ? w : splitName(w.name);
+    const cust = { ...TC_CUST(w.member ? w.member.phone : w.phone), name: w.member ? '' : first, title, kids: w.kids || 0, infants: w.infants || 0, note: w.note || '', member: w.member || null, needs: w.needs || [], fromWl: true };
+    this.setState({ card: null, cardOpen: null, cardToast: false, ...this.seatExit(), wlData: this.state.wlData.filter(x => x.no !== w.no),
+      data: this.update(l => { const x = l.find(y => y.id === t.id);
+        Object.assign(x, { status: 'seated', guests: w.people, mins: 0, orderNo: '#A' + (1040 + t.id * 7), pending: w.pendingCount > 0, cust }); }) });
+    this.showToast(`${t.name}已開桌${qr ? '，已列印 QR Code' : ''}`);
+    this.landOn(t.id);
+  }
+  // 候位開桌到有人桌「本桌會員」：候位與該桌都是會員（且不同人）時才出現；該桌目前會員在前（預設），候位會員為切換對象；前綴標示「原本桌會員」／「新移入會員」
+  seatChoices(t, w) {
+    const tm = t.cust && t.cust.member, wm = w.member;
+    if (!tm || !wm || tm.name === wm.name) return [];
+    return [{ name: tm.name, phone: tm.phone, from: '原本桌會員', wl: false }, { name: wm.name, phone: wm.phone, from: '新移入會員', wl: true }];
+  }
+  // 候位開桌到有人桌：桌況不變、人數加上候位人數（超過座位數照加）；選候位會員時該桌會員改為候位會員，否則不變；
+  // 任一邊有待確認訂單即保留待確認標記；候位清單移除該筆並離開選桌模式
+  seatJoin(t, qr) {
+    const w = this.seatEntry(), pick = this.seatChoices(t, w)[this.state.cardOpen.member];
+    const label = `${w.no} ${w.name}`.trim();
+    this.setState({ card: null, cardOpen: null, cardToast: false, ...this.seatExit(), wlData: this.state.wlData.filter(x => x.no !== w.no),
+      data: this.update(l => {
+        const x = l.find(y => y.id === t.id);
+        x.guests = (x.guests ?? 0) + w.people;
+        x.pending = x.pending || w.pendingCount > 0;
+        if (pick && pick.wl) x.cust = { ...x.cust, member: w.member };
+      }) });
+    this.showToast(`已將 ${label} 加入${t.name}${qr ? '，已列印 QR Code' : ''}`);
+    this.landOn(t.id);
+  }
+  // 量測桌位圖位置與縮放；拖曳／平移只在按下時量一次，避免每次移動都強制重新排版
+  measure() { return this.rect = this.floorRef.current.getBoundingClientRect(); }
+  // 觸點的可視範圍座標
+  view(e) {
+    const r = this.rect;
+    const k = W / r.width;
+    return { x: (e.clientX - r.left) * k, y: (e.clientY - r.top) * k };
+  }
+  // 觸點的畫布座標（加上平移量）
+  local(e) {
+    const v = this.view(e), { pan } = this.state;
+    return { x: v.x + pan.x, y: v.y + pan.y };
+  }
+  setPan(x, y, extra) {
+    this.setState({ ...extra, pan: { x: Math.max(0, Math.min(CW - W, x)), y: Math.max(0, Math.min(CH - this.state.viewH, y)) } });
+  }
+  // R63 候位開桌：可視範圍內沒有完整可見的空桌時，以最短距離捲到最近的空桌（只捲到剛好露出、離邊 24px）；整層無空桌則跳 Toast
+  seekEmpty() {
+    if (!this.state.seat) return;
+    const NO_EMPTY = '本樓層沒有空桌', NO_FIT = '本樓層沒有符合條件的空桌';
+    const all = this.tables().filter(t => t.status === 'empty');
+    if (!all.length) return this.showToast(NO_EMPTY);
+    // 有符合條件的空桌只找它們；都不符合時退回找最近的任一空桌並提示
+    const fits = all.filter(t => this.seatFits(t)), empties = fits.length ? fits : all;
+    if (!fits.length) this.showToast(NO_FIT);
+    else if (this.state.toast && [NO_EMPTY, NO_FIT].includes(this.state.toast.text)) { clearTimeout(this.tt); this.setState({ toast: null }); } // 已有符合的空桌時收起
+    const pan = this.state.pan, vh = this.state.viewH + TABS_H; // 選桌模式頁籤列隱藏
+    const HINT = 52, M = 24, MM = { w: 190 + 16, h: 100 + 16 }; // 提示列、邊距、小地圖（含距邊 16px）
+    const maxX = CW - W, maxY = CH - this.state.viewH;
+    const box = t => ({ l: t.x - t.size / 2, t: t.y - t.size / 2, r: t.x + t.size / 2, b: t.y + t.size / 2 });
+    const seen = (b, p) => b.l >= p.x && b.r <= p.x + W && b.t >= p.y + HINT && b.b <= p.y + vh &&
+      !(b.r > p.x + W - MM.w && b.b > p.y + vh - MM.h);
+    if (empties.some(t => seen(box(t), pan))) return;
+    const fit = (lo, hi, a, z) => a < lo ? a - lo : z > hi ? z - hi : 0; // 需要的位移量
+    const clamp = p => ({ x: Math.max(0, Math.min(maxX, p.x)), y: Math.max(0, Math.min(maxY, p.y)) });
+    let best = null;
+    empties.forEach(t => {
+      const b = box(t);
+      const p = clamp({ x: pan.x + fit(pan.x, pan.x + W, b.l - M, b.r + M), y: pan.y + fit(pan.y + HINT, pan.y + vh, b.t - M, b.b + M) });
+      // 落在小地圖下：再往右或往下捲到避開小地圖，取較近者
+      const cands = seen(b, p) ? [p] : [
+        clamp({ x: b.r + M - (W - MM.w), y: p.y }),
+        clamp({ x: p.x, y: b.b + M - (vh - MM.h) }),
+      ];
+      cands.forEach(c => {
+        const d = Math.hypot(c.x - pan.x, c.y - pan.y) + (seen(b, c) ? 0 : 1e6);
+        if (!best || d < best.d) best = { ...c, d };
+      });
+    });
+    this.autoPan(best.x, best.y);
+  }
+  // 平滑捲動 0.35 秒 ease-out；減少動態效果時直接跳過去；使用者按下畫布、滾輪或切樓層即中止
+  autoPan(x, y) {
+    this.stopAutoPan();
+    const from = this.state.pan;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return this.setPan(x, y);
+    const t0 = performance.now(), dur = 350;
+    const step = now => {
+      const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      this.setPan(from.x + (x - from.x) * e, from.y + (y - from.y) * e);
+      this.autoRaf = k < 1 ? requestAnimationFrame(step) : null;
+    };
+    this.autoRaf = requestAnimationFrame(step);
+  }
+  stopAutoPan() {
+    clearTimeout(this.seekTimer);
+    cancelAnimationFrame(this.autoRaf); this.autoRaf = null;
+  }
+  // pointermove 可能比螢幕刷新更頻繁：每幀只處理最新一次觸點
+  schedule(fn) {
+    this.pending = fn;
+    if (!this.pendingRaf) this.pendingRaf = requestAnimationFrame(() => this.flush());
+  }
+  flush() {
+    cancelAnimationFrame(this.pendingRaf); this.pendingRaf = null;
+    const fn = this.pending; this.pending = null;
+    if (fn) fn();
+  }
+  panDown(e) {
+    this.measure();
+    const v0 = this.view(e), pan0 = this.state.pan;
+    let moved = false;
+    const move = () => {
+      const v = this.view(this.lastEv), dx = v.x - v0.x, dy = v.y - v0.y;
+      if (!moved && Math.hypot(dx, dy) < 6) return;
+      moved = true;
+      this.setPan(pan0.x - dx, pan0.y - dy);
+    };
+    this.mv = ev => { this.lastEv = { clientX: ev.clientX, clientY: ev.clientY }; this.schedule(move); };
+    this.up = () => { this.flush(); this.unbind(); };
+    addEventListener('pointermove', this.mv); addEventListener('pointerup', this.up); addEventListener('pointercancel', this.up);
+  }
+  // 拖曳中依最後觸點更新目標桌
+  dragTo(t) {
+    const p = this.local(this.lastEv);
+    const over = this.hit(p, t.id);
+    this.setState({ drag: { id: t.id, x: p.x, y: p.y, overId: over ? over.id : null }, popover: null });
+  }
+  // 拖曳到桌位圖邊緣時自動捲動
+  autoScroll(t) {
+    if (this.raf) return;
+    const step = () => {
+      this.raf = null;
+      if (!this.state.drag) return;
+      const v = this.view(this.lastEv), speed = d => Math.ceil((EDGE - Math.max(0, d)) / EDGE * EDGE_SPEED);
+      const dx = v.x < EDGE ? -speed(v.x) : v.x > W - EDGE ? speed(W - v.x) : 0;
+      const viewHDrag = this.state.viewH + TABS_H;
+      const dy = v.y < EDGE ? -speed(v.y) : v.y > viewHDrag - EDGE ? speed(viewHDrag - v.y) : 0;
+      const { pan } = this.state;
+      this.setPan(pan.x + dx, pan.y + dy);
+      if (this.state.pan.x === pan.x && this.state.pan.y === pan.y) return;
+      this.dragTo(t);
+      this.raf = requestAnimationFrame(step);
+    };
+    this.raf = requestAnimationFrame(step);
+  }
+  hit(p, exceptId) {
+    return this.tables().find(t => {
+      if (t.id === exceptId) return false;
+      const h = t.size / 2 + 12;
+      return t.shape === 'circle' ? Math.hypot(p.x - t.x, p.y - t.y) <= h : Math.abs(p.x - t.x) <= h && Math.abs(p.y - t.y) <= h;
+    });
+  }
+  // 取消拖曳：資料不變（R14）
+  cancelDrag() {
+    clearTimeout(this.lpTimer);
+    this.unbind();
+    cancelAnimationFrame(this.raf); this.raf = null;
+    this.pending = null;
+    this.setState({ drag: null, press: null });
+  }
+  unbind() {
+    if (this.mv) { removeEventListener('pointermove', this.mv); removeEventListener('pointerup', this.up); removeEventListener('pointercancel', this.up); this.mv = null; }
+    if (this.lost) { this.floorRef.current.removeEventListener('lostpointercapture', this.lost); this.lost = null; }
+  }
+  // 桌位：輕點開關 Popover；長按（有人的桌）拿起拖曳卡；長按完成前滑動則平移畫布
+  down(t, e) {
+    e.stopPropagation();
+    this.measure();
+    this.lastEv = { clientX: e.clientX, clientY: e.clientY };
+    const v0 = this.view(e), pan0 = this.state.pan, canDrag = t.status !== 'empty' && !this.state.seat && !this.state.swap;
+    let mode = 'press'; // press → drag（長按完成）或 pan（提早滑動）
+    const pid = e.pointerId, floorEl = this.floorRef.current;
+    this.setState({ press: { id: t.id } });
+    const lift = () => {
+      mode = 'drag';
+      this.setState({ press: null });
+      // 拿起後由桌位圖接收這根手指後續的所有事件，避免放開的事件被其他元素或系統手勢吃掉
+      try { floorEl.setPointerCapture(pid); } catch (err) { /* 手指已離開時無法捕捉，交給 pointerup／pointercancel */ }
+      this.lost = () => this.up({ type: 'pointercancel', pointerId: pid });
+      floorEl.addEventListener('lostpointercapture', this.lost);
+      this.dragTo(t);
+      this.autoScroll(t);
+    };
+    if (canDrag) this.lpTimer = setTimeout(lift, parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-long-press')));
+    const move = () => {
+      if (mode === 'drag') { this.dragTo(t); this.autoScroll(t); return; }
+      const v = this.view(this.lastEv), dx = v.x - v0.x, dy = v.y - v0.y;
+      if (mode === 'press') {
+        if (Math.hypot(dx, dy) < 6) return;
+        mode = 'pan';
+        clearTimeout(this.lpTimer);
+        this.setState({ press: null, popover: null });
+      }
+      this.setPan(pan0.x - dx, pan0.y - dy);
+    };
+    this.mv = ev => { if (ev.pointerId !== pid) return; this.lastEv = { clientX: ev.clientX, clientY: ev.clientY }; this.schedule(move); };
+    this.up = ev => {
+      if (ev.pointerId !== pid) return;
+      // pointercancel（系統中斷觸控）與失去捕捉都視為取消：拖曳中不放到目標桌、按住中不開桌卡
+      const cancel = ev.type === 'pointercancel';
+      clearTimeout(this.lpTimer);
+      this.flush();
+      this.unbind();
+      cancelAnimationFrame(this.raf); this.raf = null;
+      const d = this.state.drag;
+      if (d) { this.setState({ drag: null }); if (d.overId && !cancel) this.drop(d.id, d.overId); }
+      else if (cancel) this.setState({ press: null });
+      // 點桌一律開桌卡；空桌建立開桌暫存；開啟當下是否已套用會員決定會員卡片的初始狀態（不播動畫）
+      // 選桌模式：空桌與有人桌（待離桌除外）開啟候位開桌視窗；有人桌預設帶入該桌目前會員（member: 0）
+      else if (mode === 'press' && this.state.seat) {
+        this.setState({ press: null });
+        if (t.status === 'leaving') this.setState({ seatLeave: { to: t.id } });
+        else { this.cardArmed = false; this.cardStartMember = false; this.setState({ popover: null, card: t.id, cardOpen: { ...TC_OPEN_DEFAULT(), seatNo: this.state.seat.no, member: 0 }, cardToast: false }); }
+      }
+      // 換桌選桌模式：點來源桌以外的桌即接換桌流程（空桌換桌、有人桌合併；多筆訂單先選訂單）
+      else if (mode === 'press' && this.state.swap) {
+        this.setState({ press: null });
+        if (t.id !== this.state.swap.from) this.drop(this.state.swap.from, t.id);
+      }
+      else if (mode === 'press') {
+        this.cardArmed = false;
+        this.cardStartMember = !!(t.cust && t.cust.member);
+        this.setState({ press: null, popover: null, card: t.id, cardOpen: t.status === 'empty' ? TC_OPEN_DEFAULT() : null, cardToast: false });
+      }
+    };
+    addEventListener('pointermove', this.mv); addEventListener('pointerup', this.up); addEventListener('pointercancel', this.up);
+  }
+  update(fn) {
+    const data = JSON.parse(JSON.stringify(this.state.data));
+    const list = data[this.state.floor].tables;
+    fn(list);
+    return data;
+  }
+  showToast(text) {
+    clearTimeout(this.tt);
+    this.setState({ toast: { text } });
+    this.tt = setTimeout(() => this.setState({ toast: null }), 5000);
+  }
+  // 落桌回饋（R64）：目標桌輕彈＋光圈一次，播完移除；清桌不呼叫；切換樓層時清掉
+  landOn(id) {
+    this.clearLand();
+    const i = this.tables().findIndex(t => t.id === id), el = $('tables').children[i];
+    if (!el) return;
+    const cs = getComputedStyle(document.documentElement), sec = n => parseFloat(cs.getPropertyValue(n)) * 1000;
+    const total = sec('--land-delay') + Math.max(sec('--dur-land-ring'), sec('--dur-land-pop'), matchMedia('(prefers-reduced-motion: reduce)').matches ? sec('--dur-land-static') : 0);
+    void el.offsetWidth;
+    el.classList.add('is-landed');
+    this.landEl = el;
+    this.landTimer = setTimeout(() => this.clearLand(), total + 50);
+  }
+  clearLand() {
+    clearTimeout(this.landTimer);
+    if (this.landEl) this.landEl.classList.remove('is-landed');
+    this.landEl = null;
+  }
+  clear(t) { Object.assign(t, { status: 'empty', guests: 0, amount: 0, mins: 0, orderNo: '', orders: 0, list: null, pending: false, cust: null }); }
+  drop(fromId, toId) {
+    const from = this.tables().find(t => t.id === fromId), to = this.tables().find(t => t.id === toId);
+    if (to.status === 'leaving') { this.setState({ leaveAsk: { from: fromId, to: toId } }); return; }
+    // 可搬移的單（正式訂單＋待確認訂單）2 張以上：不論目標桌狀態，先開「選擇要換桌的訂單」（預設全選）；待離桌整桌搬移不選
+    if (this.units(from) > 1) { this.setState({ move: { from: fromId, to: toId, step: 'pick', sel: [...(from.pending ? ['p'] : []), ...from.list.map(o => o.no)] } }); return; }
+    // 只有 1 張單或佔桌的來源桌到有人桌：一律開「加入有人桌」（超過座位數時視窗內提示）
+    if (to.status !== 'empty') { this.setState({ move: { from: fromId, to: toId, step: 'cap', member: 0 } }); return; }
+    this.moveAll(fromId, toId);
+  }
+  // 可搬移的單：正式訂單＋待確認訂單（待確認視為 1 張）；待離桌（無待確認）為整桌搬移，視為 1
+  units(t) { return t.status === 'leaving' && !t.pending ? 1 : (t.list ? t.list.length : 0) + (t.pending ? 1 : 0); }
+  // 搬的是訂單（有正式訂單或待確認訂單），佔桌或待離桌且無待確認時搬的是這組客人
+  movesOrders(t) { return (t.status !== 'seated' && t.status !== 'leaving') || t.pending; }
+  // 整桌移到空桌（R11）
+  moveAll(fromId, toId) {
+    const from = this.tables().find(t => t.id === fromId), to = this.tables().find(t => t.id === toId);
+    const data = this.update(list => {
+      const a = list.find(t => t.id === fromId), b = list.find(t => t.id === toId);
+      Object.assign(b, { status: a.status, guests: a.guests, amount: a.amount, mins: a.mins, orderNo: a.orderNo, orders: a.orders, list: a.list || null, pending: a.pending, cust: a.cust });
+      this.clear(a);
+    });
+    this.setState({ data, move: null, swap: null });
+    this.showToast(`已將${from.name}${this.movesOrders(from) ? '訂單' : ''}移至${to.name}`);
+    this.landOn(toId);
+  }
+  // 整桌併入有人桌（R13）；目標桌沒有訂單明細時只累加訂單數；用餐時間（開桌時間）維持目標桌
+  // pick：「加入有人桌」視窗選的會員序號，選來源會員時目標桌會員改為該會員
+  mergeAll(fromId, toId, pick) {
+    const from = this.tables().find(t => t.id === fromId), to = this.tables().find(t => t.id === toId);
+    const who = pick === undefined ? null : this.capChoices(from, to)[pick];
+    const data = this.update(l => {
+      const a = l.find(t => t.id === fromId), b = l.find(t => t.id === toId);
+      b.guests = (b.guests ?? 0) + (a.guests ?? 1); b.amount += a.amount; b.pending = a.pending || b.pending;
+      b.list = [...(a.list || []), ...(b.list || [])]; b.orders = b.list.length;
+      if (b.status === 'seated') b.status = a.status;
+      if (who && who.src) b.cust = { ...b.cust, member: { id: 1000 + b.id, type: 0, level: '一般會員', name: who.name, phone: who.phone } };
+      this.clear(a);
+    });
+    this.setState({ data, move: null, swap: null });
+    this.showToast(`已將${from.name}訂單併入${to.name}`);
+    this.landOn(toId);
+  }
+  // 選擇訂單視窗按「換桌」：全選→移至空桌，或一律開「加入有人桌」；部分→空桌直接搬移（不跳視窗），有人桌開加入有人桌視窗（填來客數）
+  confirmPick() {
+    const m = this.state.move, from = this.tables().find(t => t.id === m.from), to = this.tables().find(t => t.id === m.to);
+    const all = m.sel.length === this.units(from), toEmpty = to.status === 'empty';
+    if (!m.sel.length) return;
+    if (!all) return toEmpty ? this.movePartial() : this.setState({ move: { ...m, step: 'partial', adults: 1, kids: 0, infants: 0, member: 0 } });
+    if (toEmpty) return this.moveAll(m.from, m.to);
+    this.setState({ move: { ...m, step: 'cap', member: 0 } });
+  }
+  // 部分訂單換桌：勾選的訂單、金額移到目標桌；來源桌人數不變，保留其餘訂單
+  // 空桌：直接搬移（不填來客數），目標桌無桌人數（顯示 -），顧客資料與用餐時間複製來源桌
+  // 有人桌：目標桌人數加上填寫的來客數，只有選了來源會員時才換成該會員
+  movePartial() {
+    const m = this.state.move, from = this.tables().find(t => t.id === m.from), to = this.tables().find(t => t.id === m.to);
+    const picked = from.list.filter(o => m.sel.includes(o.no)), movePending = m.sel.includes('p'), toEmpty = to.status === 'empty', total = toEmpty ? 0 : m.adults + m.kids + m.infants;
+    const who = toEmpty ? null : (this.moveChoices(picked, to, from)[m.member] || null);
+    const asMember = (w, id) => ({ id, type: 0, level: '一般會員', name: w.name, phone: w.phone });
+    const data = this.update(l => {
+      const a = l.find(t => t.id === m.from), b = l.find(t => t.id === m.to);
+      const moved = a.list.filter(o => m.sel.includes(o.no)), sum = moved.reduce((n, o) => n + o.price, 0);
+      // 只移走待確認訂單時，訂單狀態不變；正式訂單都移走、只剩待確認訂單時來源桌變佔桌
+      const status = a.status;
+      a.list = a.list.filter(o => !m.sel.includes(o.no)); a.orders = a.list.length; a.amount -= sum; a.pending = a.pending && !movePending;
+      if (!a.list.length) a.status = 'seated';
+      if (toEmpty) Object.assign(b, {
+        status: moved.length ? status : 'seated', guests: null, amount: sum, mins: a.mins, orderNo: '#A' + (1040 + b.id * 7), orders: moved.length, list: moved.length ? moved : null, pending: movePending,
+        cust: a.cust ? JSON.parse(JSON.stringify(a.cust)) : null,
+      });
+      else {
+        b.guests = (b.guests ?? 0) + total; b.amount += sum; b.pending = b.pending || movePending;
+        b.list = [...moved, ...(b.list || [])]; b.orders = b.list.length;
+        if (b.status === 'seated' && moved.length) b.status = status;
+        if (who && who.src) b.cust = { ...b.cust, member: asMember(who, 1000 + b.id) };
+      }
+    });
+    this.setState({ data, move: null, swap: null });
+    this.showToast(`已將${from.name} ${picked.length + (movePending ? 1 : 0)} 筆訂單${toEmpty ? '移至' : '併入'}${to.name}`);
+    this.landOn(m.to);
+  }
+  // 「本桌會員」：勾選訂單中有會員、且目標桌也有會員時才出現；目標桌會員在前（預設），勾選訂單中第一位會員為切換對象；前綴標示「原本桌會員」／「新移入會員」
+  moveChoices(orders, to, from) {
+    const tm = to.cust && to.cust.member, o = orders.find(x => x.member);
+    return o && tm ? [{ name: tm.name, phone: tm.phone, member: true, src: false, from: '原本桌會員' }, { name: o.name, phone: o.phone, member: true, src: true, from: '新移入會員' }] : [];
+  }
+  // 整桌併入時的會員選項：看來源桌顧客套用的會員
+  capChoices(from, to) {
+    const fm = from.cust && from.cust.member;
+    return this.moveChoices(fm ? [{ member: true, name: fm.name, phone: fm.phone }] : [], to, from);
+  }
+  stepMoveGuest(k, d) {
+    const m = this.state.move, min = k === 'adults' ? 1 : 0;
+    this.setState({ move: { ...m, [k]: Math.max(min, m[k] + d) } });
+  }
+
+  // 加入待離桌 Alert（iOS 原生樣式，同清桌 Alert）
+  renderLeaveAlert() {
+    const a = this.state.leaveAsk, sl = this.state.seatLeave;
+    // 候位加入待離桌（同樣式，文字依 Figma「候位開桌（加入待離桌）」）
+    if (sl) {
+      const to = this.tables().find(t => t.id === sl.to), w = this.seatEntry();
+      return html($('leaveAlert'), `<div class="ios-alert-scrim"><div class="ios-alert">` +
+        `<div class="ios-alert-body"><div class="ios-alert-title">加入${to.name}</div>` +
+          `<div class="ios-alert-msg">確定要將候位${w.no}號移動至${to.name}？\n${to.name}為待離桌狀態，換桌後會清除桌狀態</div></div>` +
+        `<div class="ios-alert-actions"><div class="ios-alert-btn" data-act="seatLeaveCancel">取消</div><div class="ios-alert-btn is-destructive" data-act="seatLeaveConfirm">清桌後加入</div></div>` +
+      `</div></div>`);
+    }
+    if (!a) return html($('leaveAlert'), '');
+    const from = this.tables().find(t => t.id === a.from), to = this.tables().find(t => t.id === a.to);
+    html($('leaveAlert'), `<div class="ios-alert-scrim"><div class="ios-alert">` +
+      `<div class="ios-alert-body"><div class="ios-alert-title">加入${to.name}</div>` +
+        `<div class="ios-alert-msg">確定要將${from.name}移動至${to.name}？\n${to.name}為待離桌狀態，換桌後會清除桌狀態</div></div>` +
+      `<div class="ios-alert-actions"><div class="ios-alert-btn" data-act="leaveCancel">取消</div><div class="ios-alert-btn is-destructive" data-act="leaveConfirm">清桌後加入</div></div>` +
+    `</div></div>`);
+  }
+  // 換桌視窗：選擇訂單（pick）→ 整桌併入有人桌的「加入有人桌」（cap，單筆訂單、佔桌也走這裡），或部分訂單的移至空桌／加入有人桌（partial）
+  renderMoveDialog() {
+    const m = this.state.move;
+    if (!m) { this.mvOpen = false; return html($('moveDialog'), ''); }
+    if (!this.mvOpen) { this.mvOpen = true; this.mvArmed = false; }
+    const list = this.tables(), from = list.find(t => t.id === m.from), to = list.find(t => t.id === m.to);
+    const tableDesc = t => `${t.name}（${SHAPE_LABEL[t.shape]}, ${t.cap}人桌）`;
+    const row = (k, val) => `<div class="tc-row"><span>${k}</span><span class="tc-row-val">${val}</span></div>`;
+    const nav = (title, cancel) => `<div class="mv-nav">${cancel ? `<div class="wla-nav-btn" data-act="mvCancel">取消</div>` : ''}<div class="wla-nav-title">${title}</div></div>`;
+    const submit = (label, act) => `<div class="mv-footer"><div class="mv-btns"><div class="nav-btn nav-btn-primary" data-act="${act}">${label}</div></div></div>`;
+    // 本桌會員（可切換）：沒有選項時不顯示
+    const memberPick = members => memberSwap(members, m.member, 'mvMember');
+    let inner = '';
+    if (m.step === 'pick') {
+      const blocked = !m.sel.length;
+      inner = nav('選擇要換桌的訂單') +
+        `<div class="mv-body"><div>` + [...(from.pending ? [{ no: 'p', pending: true, items: PENDING_ORDER.map(o => o.name).join(', '), price: PENDING_ORDER.reduce((n, o) => n + o.price, 0) }] : []), ...from.list].map(o =>
+          `<div class="mv-order${m.sel.includes(o.no) ? '' : ' is-off'}" data-act="mvToggle" data-no="${o.no}"><div class="mv-order-inner">` +
+            `<span class="mv-check">${m.sel.includes(o.no) ? ICON_CHECK : ''}</span>` +
+            `<div class="mv-order-main">` +
+              // 待確認訂單：標題「待確認訂單」（同會員姓名樣式，取消勾選變黑）
+              `<span class="mv-order-name">${o.pending ? '<span>待確認訂單</span>' : `<span>#${o.last3}</span>${o.member ? `<span class="mv-order-emoji">👤</span><span>${o.name}</span>` : ''}`}</span>` +
+              `<span class="mv-order-meta mv-order-items">${o.items}</span>` +
+            `</div>` +
+            `<span class="mv-order-meta mv-order-price">${money(o.price)}</span>` +
+          `</div></div>`).join('') +
+        `</div></div>` +
+        `<div class="mv-footer">` +
+          // 部分訂單移到空桌：目標桌沒有 QR Code，提示需要時再新建
+          ((to.status === 'empty') && m.sel.length && m.sel.length < this.units(from) ? `<div class="tc-seat-notice mv-notice">${ICON_INFO}移桌後如需掃碼點餐，請至桌位詳情頁新建 QR Code</div>` : '') +
+          `<div class="mv-btns"><div class="nav-btn nav-btn-secondary" data-act="mvCancel">取消</div><div class="nav-btn nav-btn-primary${blocked ? ' is-disabled' : ''}" data-act="mvPick">換桌</div></div>` +
+        `</div>`;
+    } else if (m.step === 'cap') {
+      const sum = (from.guests ?? 1) + (to.guests ?? 0);
+      inner = nav('加入有人桌', true) +
+        `<div class="mv-body"><div class="wla-card tc-rows">${row('來源桌', tableDesc(from))}${row('來客數', `成人 ${from.guests ?? 1}人`)}${row('目標桌來客數', (to.guests ?? '-') + '人')}</div>` +
+          memberPick(this.capChoices(from, to)) +
+          (sum > to.cap ? `<div class="mv-warn">加入後 ${sum} 人，超過桌位容量</div>` : '') + `</div>` +
+        submit('確認加入', 'mvCapConfirm');
+    } else {
+      const picked = from.list.filter(o => m.sel.includes(o.no));
+      const members = this.moveChoices(picked, to, from), total = m.adults + m.kids + m.infants;
+      inner = nav('加入有人桌', true) +
+        `<div class="mv-body"><div class="wla-card tc-rows">${row('來源桌', tableDesc(from))}${row('目標桌', tableDesc(to))}</div>` +
+          memberPick(members) +
+          `<div><div class="wla-subtitle">來客數</div><div class="wla-card wla-guests">` + WLA_GUESTS.map(g =>
+            `<div class="wla-guest"><div class="wla-guest-inner">` +
+              `<div class="wla-guest-label">${g.label}${g.required ? `<span class="wla-required">必填</span>` : ''}</div>` +
+              `<div class="wla-guest-count"><span>${m[g.k]}</span><div class="wla-stepper">` +
+                `<div class="wla-step" data-act="mvStep" data-k="${g.k}" data-d="-1">${ICON_MINUS}</div>` +
+                `<div class="wla-step" data-act="mvStep" data-k="${g.k}" data-d="1">${ICON_PLUS}</div>` +
+              `</div></div>` +
+            `</div></div>`).join('') +
+            `<div class="tc-total"><span>合計</span><span class="tc-total-val">${total}人</span></div>` +
+          `</div></div>` +
+          ((to.guests ?? 0) + total > to.cap ? `<div class="mv-warn">加入後 ${(to.guests ?? 0) + total} 人，超過桌位容量</div>` : '') +
+        `</div>` +
+        submit('確認加入', 'mvPartialConfirm');
+    }
+    // 狀態列以下的區域置中，上下至少留 20px
+    const contentH = this.state.screenH - this.state.safeTopPx;
+    // 外框（遮罩、面板）只在開啟時建立，避免每次勾選重播淡入動畫；同一步驟內保留清單捲動位置
+    html($('moveDialog'), `<div class="mv-scrim" id="mvScrim"></div><div class="mv-panel" id="mvPanel"></div>`);
+    const scrim = $('mvScrim'), panel = $('mvPanel');
+    scrim.dataset.act = 'mvCancel'; // 點遮罩同「取消」（各步驟皆同）
+    setStyle(panel, { top: `${this.state.safeTopPx + contentH / 2}px`, maxHeight: `${contentH - 40}px` });
+    const body = panel.querySelector('.mv-body'), keep = body && panel._step === m.step ? body.scrollTop : 0;
+    html(panel, inner);
+    panel._step = m.step;
+    if (keep) panel.querySelector('.mv-body').scrollTop = keep;
+  }
+
+  renderVals() {
+    const { floor, drag, popover, filter, toast, pan, viewH, press, timerMode, tags, seatFilter, seat, swap } = this.state;
+    const picking = !!(seat || swap); // 候位開桌或換桌的選桌模式
+    const list = this.tables();
+    const src = drag && list.find(t => t.id === drag.id);
+    const overT = drag && drag.overId && list.find(t => t.id === drag.overId);
+
+    const tables = list.map(t => {
+      const s = ST[t.status], isEmpty = t.status === 'empty';
+      const isSrc = drag && drag.id === t.id, isOver = drag && drag.overId === t.id;
+      let bg = s.bg, border = 'var(--bd-table)', scale = 1, shadow = 'none', badge = null;
+      // 桌況篩選不符 22%；標籤或座位數條件不符 30%（桌況也不符時取較淡的 22%）
+      let opacity = filter && filter !== t.status ? 0.22 : !hasTags(t, tags) || !fitsSeat(t, seatFilter) ? 'var(--op-tag-dim)' : 1;
+      if (popover === t.id && !drag) shadow = 'var(--sh-table-selected)';
+      if (press && press.id === t.id && !drag) scale = 'var(--press-scale)';
+      if (drag) {
+        opacity = 1;
+        if (isSrc) opacity = 0.3;
+        if (isOver && isEmpty) shadow = 'var(--sh-table-drop-empty)';
+        else if (isOver) { scale = 1.06; shadow = 'var(--sh-table-drop-merge)'; }
+      }
+      // 選桌模式（候位開桌、點擊換桌）：空桌加呼吸外框，有人的桌 30%（篩選淡化暫時解除）
+      // 候位開桌：不符合條件的空桌（R63）也 30%、無呼吸外框
+      const fit = !seat || !isEmpty || this.seatFits(t);
+      if (picking) opacity = isEmpty && fit ? 1 : isEmpty ? 'var(--op-tag-dim)' : 0.3;
+      if (isEmpty) shadow = shadow === 'none' ? 'var(--sh-table-empty)' : `${shadow}, var(--sh-table-empty)`;
+      // 佔桌計時：非空桌才顯示；剩餘模式超過時限改顯示超時標籤
+      const pad = n => String(n).padStart(2, '0'), left = TABLE_TIME_LIMIT - t.mins;
+      const time = isEmpty || !timerMode ? null :
+        timerMode === 'used' ? { text: `${pad(Math.floor(t.mins / 60))}:${pad(t.mins % 60)}` } :
+        left >= 0 ? { text: `${left}分` } : { over: -left };
+      return {
+        name: t.name, isEmpty, badge, bg, border, color: s.color, opacity, scale, shadow,
+        userIcon: ICON[s.userIcon], pending: t.pending, time,
+        left: t.x - t.size / 2, top: t.y - t.size / 2, size: t.size,
+        radius: t.shape === 'circle' ? '50%' : '8px',
+        guestsText: isEmpty ? `${t.cap}` : `${t.guests ?? '-'}/${t.cap}`,
+        seatTarget: picking && isEmpty && fit,
+        onDown: e => this.down(t, e),
+      };
+    });
+
+    // 有桌況篩選、勾標籤或選座位數時，右側改顯示本樓層同時符合所有條件的桌數
+    const filtered = !!filter || tags.length > 0 || !!seatFilter;
+    const total = filtered ? `本區 ${list.filter(t => (!filter || filter === t.status) && hasTags(t, tags) && fitsSeat(t, seatFilter)).length} 桌符合` : '全店 100 桌';
+
+    const counts = {}; ORDER.forEach(k => counts[k] = list.filter(t => t.status === k).length);
+    const chips = ORDER.map(k => ({
+      label: ST[k].label, count: counts[k], dot: ST[k].dot,
+      isEmpty: k === 'empty',
+      bg: filter === k ? 'var(--c-chip-active-bg)' : 'var(--c-chip-bg)', outline: filter === k ? 'var(--bd-chip-active)' : 'none',
+      onClick: () => this.setState({ filter: filter === k ? null : k }),
+    }));
+
+    let pop = null;
+    const pt = popover && list.find(t => t.id === popover);
+    if (pt) {
+      const right = pt.x + pt.size / 2 + 14 + 240 < pan.x + W - 10;
+      pop = {
+        left: right ? pt.x + pt.size / 2 + 14 : pt.x - pt.size / 2 - 254,
+        top: Math.max(pan.y + 10, Math.min(pan.y + viewH - 16 - 250, pt.y - 70)),
+        name: pt.name, status: ST[pt.status].label, dot: ST[pt.status].dot,
+        hasOrder: pt.status !== 'empty', isEmpty: pt.status === 'empty',
+        orderNo: pt.orderNo, guestsText: `${pt.guests}/${pt.cap} 人`, mins: pt.mins, amount: money(pt.amount),
+        capText: `${pt.cap} 人座 · 目前無訂單`,
+        onOpen: () => {
+          this.setState({ popover: null, data: this.update(l => Object.assign(l.find(x => x.id === pt.id), { status: 'seated', guests: Math.min(2, pt.cap), mins: 0, orderNo: '#A' + (1040 + pt.id * 7), cust: TC_CUST('') })) });
+          this.showToast(`${pt.name}已開桌`);
+        },
+      };
+    }
+
+    // 小地圖藍框：可視範圍在畫布中的位置，對應到小地圖內距 3px 的區域
+    const kx = (190 - 6) / CW, ky = (100 - 6) / CH;
+    const mini = { x: 3 + pan.x * kx, y: 3 + pan.y * ky, w: W * kx, h: (drag || picking ? viewH + TABS_H : viewH) * ky };
+
+    const tabs = ['設定', '預約', '桌位圖', '外帶/外送', '包裝台', '工作站', '新訂單'].map((l, i) => ({
+      label: l, bg: i === 2 ? 'var(--c-tab-active-bg)' : 'transparent', color: i === 2 ? 'var(--c-primary)' : 'var(--c-text-secondary)', r: i % 2 ? '50%' : '4px',
+    }));
+
+    return {
+      scale: this.state.scale, screenH: this.state.screenH, floorRef: this.floorRef, pan,
+      floors: Object.keys(FLOORS).map(n => ({ name: n, bg: n === floor ? 'var(--c-floor-tab-active-bg)' : 'var(--c-floor-tab-bg)', color: n === floor ? 'var(--c-floor-tab-active-fg)' : 'var(--c-floor-tab-fg)', border: n === floor ? 'none' : '1px solid var(--c-floor-tab-border)', padding: n === floor ? '4px 12px' : '3px 11px', onClick: () => { this.stopAutoPan(); this.clearLand(); this.setState({ floor: n, popover: null, card: null, swap: null, pan: { x: 0, y: 0 } }); this.seekEmpty(); } })),
+      chips, total, filtered, tables, tabs, mini, obstacles: FLOORS[floor].obstacles.map(o => ({ ...o, wm: o.wm || 'horizontal-tb' })),
+      drag: !!drag,
+      ghost: drag ? { x: drag.x - pan.x, y: drag.y - pan.y, name: src.name, guests: src.guests, hasOrder: this.movesOrders(src), orders: Math.max(1, this.units(src)) } : {},
+      showTabs: !drag && !picking,
+      dragHint: !drag ? '' : this.movesOrders(src)
+        ? (!overT ? `拖曳${src.name}訂單至目標桌` : overT.status === 'empty' ? `放開移動訂單到${overT.name}` : `放開合併訂單到${overT.name}`)
+        : (!overT ? `拖曳${src ? src.name : ''}至目標桌` : overT.status === 'empty' ? `放開移至${overT.name}` : `放開合併至${overT.name}`),
+      popover: pop, toast,
+      onFloorDown: () => popover && this.setState({ popover: null }),
+      stop: e => e.stopPropagation(),
+    };
+  }
+
+  // 將 renderVals() 的結果套用到 DOM（取代原模板的 {{ }} 綁定）
+  render() {
+    const v = this.vals = this.renderVals();
+
+    $('device').style.transform = `scale(${v.scale})`;
+    $('screen').style.height = v.screenH + 'px';
+    $('screen').style.setProperty('--safe-top', this.state.safeTopPx + 'px');
+    $('statusbarArea').style.height = this.state.safeTopPx + 'px';
+    $('waitlistCount').textContent = this.state.wlData.length;
+    $('screen').classList.toggle('is-seat-lock', !!this.state.seat);
+    $('screen').classList.toggle('is-swap-lock', !!this.state.swap);
+    $('canvas').style.transform = `translate3d(${-v.pan.x}px,${-v.pan.y}px,0)`;
+
+    html($('floorTabs'), v.floors.map((f, i) =>
+      `<div class="floor-tab" data-act="floor" data-i="${i}" style="background:${f.bg};color:${f.color};border:${f.border};padding:${f.padding}">${f.name}</div>`).join(''));
+
+    html($('chips'), v.chips.map((c, i) =>
+      `<div class="chip" data-act="chip" data-i="${i}" style="background:${c.bg};outline:${c.outline}">` +
+        (c.isEmpty ? `<svg class="chip-dot-empty" width="10" height="10" viewBox="0 0 10 10" style="stroke-dasharray:${evenDash('--bd-chip-dot-empty-dash', 2 * Math.PI * 4)}"><circle cx="5" cy="5" r="4" pathLength="${2 * Math.PI * 4}"/></svg>` : `<div class="chip-dot" style="background:${c.dot}"></div>`) + `<span>${c.label}</span><span>(${c.count})</span>` +
+      `</div>`).join(''));
+
+    html($('obstacles'), v.obstacles.map(o =>
+      `<div class="obstacle" style="left:${o.x}px;top:${o.y}px;width:${o.w}px;height:${o.h}px;border-radius:${o.r};writing-mode:${o.wm}">${o.label}</div>`).join(''));
+
+    this.renderTables(v.tables);
+    this.renderSettings();
+    this.renderTagFilter(v.total);
+    this.renderSeatFilter();
+    html($('filterClear'), v.filtered ? '<div class="filter-clear" data-act="clearFilters">清除條件</div>' : '');
+
+    const p = v.popover;
+    html($('popover'), !p ? '' :
+      `<div class="popover" data-stop style="left:${p.left - v.pan.x}px;top:${p.top - v.pan.y}px">` +
+        `<div class="popover-head">` +
+          `<div class="popover-title">${p.name}</div>` +
+          `<div class="popover-status"><div class="popover-status-dot" style="background:${p.dot}"></div>${p.status}</div>` +
+        `</div>` +
+        (p.hasOrder ?
+          `<div class="popover-grid">` +
+            `<span>訂單</span><span class="popover-val">${p.orderNo}</span>` +
+            `<span>人數</span><span class="popover-val">${p.guestsText}</span>` +
+            `<span>用餐</span><span class="popover-val">${p.mins} 分鐘</span>` +
+            `<span>金額</span><span class="popover-val popover-amount">${p.amount}</span>` +
+          `</div>` +
+          `<div class="popover-hint">長按並拖曳此桌，即可換桌或合併</div>` : '') +
+        (p.isEmpty ?
+          `<div class="popover-cap">${p.capText}</div>` +
+          `<div class="popover-open" data-act="open">開桌</div>` : '') +
+      `</div>`);
+
+    setStyle($('miniViewport'), { left: v.mini.x + 'px', top: v.mini.y + 'px', width: v.mini.w + 'px', height: v.mini.h + 'px' });
+
+    const g = v.ghost;
+    // 雙人圖示（依 Figma：前方人形主色、後方人形深色，中間以白邊分隔）
+    const people =
+      `<svg width="28" height="23" viewBox="0 0 28 23">` +
+        `<g style="fill:var(--c-ghost-icon-back)"><circle cx="19" cy="5.5" r="4.5"/><path d="M10 22c0-5.5 4-9.5 9-9.5s9 4 9 9.5z"/></g>` +
+        `<g style="fill:var(--c-table-accent);stroke:var(--c-white);stroke-width:1.5"><circle cx="10" cy="5.5" r="5"/><path d="M0.75 22.25c0-6 4.1-10.25 9.25-10.25s9.25 4.25 9.25 10.25z"/></g>` +
+      `</svg>`;
+    // 訂單板圖示（依 Figma：白底、淺藍上緣、深色夾子、三列藍點＋淺藍線）
+    const row = y => `<rect x="3" y="${y}" width="3" height="3" style="fill:var(--c-ghost-order-bullet)"/><rect x="7" y="${y - 0.5}" width="13" height="4" style="fill:var(--c-ghost-order-line)"/>`;
+    const orderIcon =
+      `<svg class="ghost-order-icon" width="23" height="31" viewBox="0 0 23 31">` +
+        `<rect x="0" y="3" width="23" height="28" style="fill:var(--c-white)"/>` +
+        `<rect x="0" y="3" width="23" height="7" style="fill:var(--c-ghost-order-head)"/>` +
+        `<rect x="6" y="2" width="11" height="4" style="fill:var(--c-ghost-order-clip-base)"/>` +
+        `<rect x="8" y="0" width="7" height="4" style="fill:var(--c-ghost-order-clip)"/>` +
+        row(14) + row(20) + row(25) +
+      `</svg>`;
+    // 拖曳卡：搬訂單時顯示訂單卡（訂單 xN），佔桌或待離桌且無待確認時顯示人數卡（人數 xN）；內容在一次拖曳中不變，只在拖曳開始時建立；之後只更新 transform
+    html($('ghost'), !v.drag ? '' :
+      `<div class="ghost">` +
+        `<div class="ghost-card">` +
+          `<div class="ghost-name">${g.name}</div>` +
+          `<div class="ghost-icon">${g.hasOrder ? orderIcon : people}</div>` +
+          `<div class="ghost-guests"><span>${g.hasOrder ? '訂單' : '人數'}</span><span>x${g.hasOrder ? g.orders : g.guests}</span></div>` +
+        `</div>` +
+      `</div>`);
+    if (v.drag) {
+      // 卡片在觸點正上方；觸點太靠上時往下移，卡片頂端不超過 --ghost-top-min（不被提示列蓋住）
+      const css = getComputedStyle(document.documentElement);
+      const gap = parseFloat(css.getPropertyValue('--ghost-gap')), topMin = parseFloat(css.getPropertyValue('--ghost-top-min'));
+      const y = Math.max(g.y, topMin + $('ghost').firstChild.firstChild.offsetHeight + gap);
+      $('ghost').firstChild.style.transform = `translate3d(${g.x}px,${y}px,0) rotate(-4deg)`;
+    }
+    html($('dragHint'), !v.drag ? '' : `<div class="drag-hint">${v.dragHint}</div>`);
+
+    html($('toast'), !v.toast ? '' :
+      `<div class="toast"><span>${v.toast.text}</span>` +
+      `</div>`);
+
+    html($('tabs'), !v.showTabs ? '' :
+      `<div class="tabbar">` + v.tabs.map(tb =>
+        `<div class="tab" style="background:${tb.bg};color:${tb.color}">` +
+          `<div class="tab-icon" style="border-color:${tb.color};border-radius:${tb.r}"></div>` +
+          `<div class="tab-label">${tb.label}</div>` +
+        `</div>`).join('') +
+      `</div>`);
+
+    this.renderWaitlist();
+    this.renderWaitlistAdd();
+    this.renderMemberSearch();
+    this.renderMemberInfo();
+    this.renderSeatHint();
+    this.renderTableCard();
+    this.renderMoveDialog();
+    this.renderLeaveAlert();
+    this.renderNeedsPool();
+  }
+
+  // 特殊需求標籤池（R57）：開在「加入標籤」下方，只列尚未加入的標籤；表單已關閉或標籤都加完時一併關閉
+  renderNeedsPool() {
+    const f = this.state.needsPool, btn = f && document.querySelector(`[data-act="needsPool"][data-f="${f}"]`);
+    if (f && !btn) this.state.needsPool = null;
+    const left = btn ? TAGS.filter(g => !this.needsOf(f).includes(g)) : [];
+    html($('needsPool'), !btn ? '' :
+      `<div class="needs-pool" id="needsPoolMenu"><div class="settings-arrow"></div><div class="settings-card">` +
+        `<div class="settings-head">標籤</div><div class="settings-gap"></div>` +
+        `<div class="tag-list">${left.map(g => `<div class="tag-chip" data-act="needsAdd" data-t="${g}">${g}</div>`).join('')}</div>` +
+      `</div></div>`);
+    if (!btn) return;
+    // 換算成畫面座標（畫面依視窗縮放）；三角形尖端（選單左緣 +24px）對準按鈕中央，下方放不下就改開在按鈕上方
+    const menu = $('needsPoolMenu'), k = this.vals.scale, sr = $('screen').getBoundingClientRect(), br = btn.getBoundingClientRect();
+    const bx = (br.left - sr.left) / k, top = (br.top - sr.top) / k, bottom = (br.bottom - sr.top) / k, h = menu.offsetHeight;
+    const up = bottom + 6 + h > this.state.screenH - 8;
+    menu.classList.toggle('is-up', up);
+    setStyle(menu, { left: bx + br.width / k / 2 - 24 + 'px', top: (up ? top - 6 - h : bottom + 6) + 'px' });
+  }
+
+  // 訂單卡：待確認（橘色標題列、紅字品項）或一般訂單（藍色標題列、顧客列、淡黃底品項）；「3/3 ↻」「已付清」依 Figma 靜態顯示
+  orderCard(t, pending) {
+    const items = pending ? PENDING_ORDER : PAID_ORDER.items, total = money(items.reduce((n, o) => n + o.price, 0));
+    return `<div class="tc-order${pending ? '' : ' is-paid'}">` +
+      `<div class="tc-order-head"><span>${t.name}</span><span>${pending ? total : PAID_ORDER.status}</span>` +
+        `<span class="tc-order-page">3/3<img src="${pending ? ICON_REFRESH : ICON_REFRESH_SOLID}" width="24" height="24" alt=""></span></div>` +
+      (pending ? '' : `<div class="tc-order-cust"><div class="tc-order-cust-row"><span>👤</span><span>${PAID_ORDER.name}</span><span>${PAID_ORDER.phone}</span></div><div>${PAID_ORDER.note}</div></div>`) +
+      `<div class="tc-order-sub">全部: 共 ${items.length} 項 (${total})</div>` +
+      items.map((o, i) =>
+        `<div class="tc-order-item"><div class="tc-order-name"><span>${i + 1}. ${o.name}</span><span>${money(o.price)}</span></div><div class="tc-order-spec">${o.spec}</div></div>`).join('') +
+    `</div>`;
+  }
+
+  // 桌卡來客數（佔桌、空桌共用）：大人／小孩／嬰兒、合計；空桌多「低消」
+  cardGuestsHTML(isOpen) {
+    return `<div><div class="wla-subtitle">來客數</div><div class="wla-card wla-guests"><div id="tcGuests"></div>` +
+        `<div class="tc-total${isOpen ? ' has-divider' : ''}"><span>合計</span><span class="tc-total-val" id="tcTotal"></span></div>` +
+        (isOpen ? `<div class="tc-total"><span>低消</span><span class="tc-total-val" id="tcMin"></span></div>` : '') +
+      `</div></div>`;
+  }
+
+  // 桌卡表單（佔桌、空桌共用）：會員卡片／手填欄位＋選擇會員、來客數（只有佔桌，排在最前面；空桌的來客數在桌卡最上方）、桌位備註；
+  // 特殊需求只有從候位開桌的佔桌才有（R29、R57；空桌桌卡、一般開桌的佔桌不顯示）
+  cardFormHTML(isOpen) {
+    const startM = !isOpen && this.cardStartMember, t = !isOpen && this.cardTable(), needs = t && t.cust && t.cust.fromWl;
+    return (isOpen ? '' : this.cardGuestsHTML(false)) +
+      `<div class="wla-swap${startM ? '' : ' is-collapsed'}" id="tcMemberSwap"><div class="wla-swap-inner"><div class="wla-card wla-member" id="tcMemberCard"></div></div></div>` +
+      `<div class="wla-swap${startM ? ' is-collapsed' : ''}" id="tcManualSwap"><div class="wla-swap-inner">` +
+        `<div class="wla-card wla-contact">` +
+          `<div class="wla-name-row">` +
+            `<label class="wla-field wla-field-name"><span class="wla-field-inner"><span class="wla-field-label">姓名</span><input class="wla-input" id="tcName" type="text" placeholder="請輸入姓名"></span></label>` +
+            `<div class="wla-titles" id="tcTitles"></div>` +
+          `</div>` +
+          `<label class="wla-field"><span class="wla-field-inner"><span class="wla-field-label">手機</span><input class="wla-input" id="tcPhone" type="text" inputmode="tel" placeholder="請輸入手機號碼"></span></label>` +
+        `</div>` +
+        `<div class="wla-card wla-link" data-act="tcMember"><span>選擇會員</span>${ICON_CHEVRON}</div>` +
+      `</div></div>` +
+      (needs ? `<div><div class="wla-subtitle tc-subtitle-wide">特殊需求設定</div><div class="wla-card tc-tags" id="tcNeeds"></div></div>` : '') +
+      `<div><div class="wla-subtitle tc-subtitle-wide">桌位備註</div><div class="wla-card tc-note-wrap"><textarea class="wla-note" id="tcNote" placeholder="特殊需求、過敏、其他注意事項..."></textarea></div></div>`;
+  }
+
+  // 選桌模式的提示列（篩選列下方）：候位開桌、點擊換桌；開桌視窗、選訂單視窗開啟時被遮罩蓋住
+  renderSeatHint() {
+    const w = this.seatEntry(), sw = this.state.swap && this.tables().find(t => t.id === this.state.swap.from);
+    const hint = (text, act) => `<div class="tc-hint seat-hint" style="top:${this.state.safeTopPx + CHROME_H}px"><span>${text}</span><div class="tc-hint-btn" data-act="${act}">取消</div></div>`;
+    html($('seatHint'), w ? hint(`選擇桌位給 ${w.name || w.no}（${w.people}人）`, 'seatCancel') : sw ? hint(`選擇目標桌（${sw.name}換桌中）`, 'swapCancel') : '');
+  }
+
+  // 空桌桌卡（一般掃碼點餐）：主畫面（收合／展開顧客資料）與進階設定兩頁都先建立，以 class 切換
+  // 候位開桌（w 為候位資料）：頂部列只有標題（點遮罩關閉）；內容為候位、來客數、桌位、低消、掃碼點餐，不顯示顧客資料；
+  // 有待確認訂單時按鈕上方提示移轉
+  openCardHTML(t, w) {
+    const row = (label, val, act) => `<div class="tc-row"${act ? ` data-act="${act}"` : ''}><span>${label}</span><span class="tc-row-val">${val}</span></div>`;
+    const advRow = r => r.k ? `<div class="tc-row"><span>${r.label}</span><div class="tc-toggle" id="tcToggle-${r.k}" data-act="tcToggle" data-k="${r.k}"></div></div>`
+      : row(r.label, r.val + (r.link ? ICON_CHEVRON : ''));
+    const guestText = w && [['成人', w.adults ?? w.people], ['小孩', w.kids], ['嬰兒', w.infants]].filter(([, n]) => n).map(([k, n]) => `${k} ${n}人`).join('、');
+    return `<div class="tc-nav">` +
+        `<div class="tc-nav-main">${w ? '' : `<div class="tc-nav-btn" data-act="tcClose">取消</div>`}<div class="tc-nav-plain-title">開桌 - ${t.name}</div></div>` +
+        `<div class="tc-nav-adv"><div class="tc-nav-btn tc-nav-back" data-act="tcAdvBack">${ICON_BACK}返回</div><div class="tc-nav-plain-title">進階設定</div></div>` +
+      `</div>` +
+      (w ? `<div class="tc-body is-main">` +
+        `<div class="wla-card tc-rows">${row('候位', `${w.no} ${w.name}`.trim())}${row('來客數', guestText)}${row('桌位', `${t.shape === 'circle' ? '圓桌' : '方桌'}, ${t.cap}人桌`)}</div>` +
+        `<div class="slot" id="seatPick"></div>` +
+        `<div class="wla-card tc-rows">${row('低消', money(w.people * TC_MIN_PER_GUEST))}</div>` +
+        `<div><div class="wla-subtitle">掃碼點餐</div><div class="wla-card tc-rows">${row('連結有效時間', '無限制')}${row('進階設定', `6項${ICON_CHEVRON}`, 'tcAdv')}</div></div>` +
+        (w.pendingCount ? `<div class="tc-seat-notice">${ICON_INFO}待確認訂單將移轉至桌位</div>` : '') +
+      `</div>` :
+      `<div class="tc-body is-main">` +
+        this.cardGuestsHTML(true) +
+        `<div class="wla-card tc-rows">${row('連結有效時間', '無限制')}${row('進階設定', `6項${ICON_CHEVRON}`, 'tcAdv')}</div>` +
+        `<div class="wla-swap${TC_GUEST_REQUIRED ? '' : ' is-collapsed'}" id="tcExpand"><div class="wla-swap-inner">${this.cardFormHTML(true)}</div></div>` +
+        (TC_GUEST_REQUIRED ? '' : `<div class="tc-expand-btn" id="tcExpandBtn" data-act="tcExpand"><span id="tcExpandText"></span><img src="${ICON_ARROW_DOWN}" width="20" height="20" alt=""></div>`) +
+      `</div>`) +
+      `<div class="tc-body is-adv">` +
+        TC_OPEN_TOGGLES.map(g => `<div class="tc-adv-group">${g.map(advRow).join('')}</div>`).join('') +
+        `<div><div class="wla-subtitle tc-subtitle-wide">服務費及折扣</div><div class="tc-adv-group">${TC_OPEN_FEES.map(l => row(l, '請輸入')).join('')}</div></div>` +
+        `<div><div class="wla-subtitle">備註</div><div class="wla-card wla-note-wrap"><textarea class="wla-note" placeholder="特殊需求、過敏、其他注意事項..."></textarea></div></div>` +
+      `</div>` +
+      `<div class="tc-footer is-open"><div class="nav-btn nav-btn-secondary" data-act="tcOpenTable" data-qr="0">開桌</div><div class="nav-btn nav-btn-primary" data-act="tcOpenTable" data-qr="1">掃碼開桌</div></div>`;
+  }
+
+  // 桌卡：外框（含輸入框）只在開啟時建立，保留輸入內容；稱謂、來客數、會員卡片等另外更新
+  // 內容依桌況：空桌 → 開桌（一般掃碼點餐）；有待確認標記 → 待確認訂單卡；佔桌 → 表單；出餐中、已出餐 → 一般訂單卡；待離桌 → 結清畫面
+  // 頂部列「清桌」只在表單、待離桌（含有待確認訂單）顯示（依 Figma）；表單資料一律記在桌上
+  renderTableCard() {
+    const t = this.state.card && this.cardTable(), seatW = this.state.cardOpen && this.state.cardOpen.seatNo ? this.seatEntry() : null;
+    const kind = !t ? null : t.status === 'empty' || seatW ? 'open' : t.pending ? 'pending' : t.status === 'seated' ? 'form' : t.status === 'leaving' ? 'done' : 'paid';
+    const hasForm = kind === 'form' || kind === 'open', hasClear = kind === 'form' || kind === 'done' || (kind === 'pending' && t.status === 'leaving');
+    const host = $('tableCard'), shell = !t ? '' :
+      // 開桌彈窗只能按「取消」關閉，點遮罩不關；候位開桌點遮罩回到選桌模式
+      `<div class="tc-scrim" id="tcScrim"${kind === 'open' && !seatW ? '' : ' data-act="tcClose"'}></div>` +
+      // 候位開桌沿用選桌模式的提示列（不另建）
+      (seatW ? '' : `<div class="tc-hint" id="tcHint"><span>${kind === 'open' ? `開桌 – ${t.name}` : `查看${t.name}`}</span><div class="tc-hint-btn" data-act="tcClose">取消</div></div>`) +
+      `<div class="tc-panel${kind === 'open' ? ' is-open' : ''}" id="tcPanel">` +
+        (kind === 'open' ? this.openCardHTML(t, seatW) :
+        `<div class="tc-nav">${hasClear ? `<div class="tc-nav-btn is-danger" data-act="tcClearAsk">清桌</div>` : `<div class="tc-nav-spacer"></div>`}` +
+          `<div class="tc-nav-title"><span class="tc-status"><span class="tc-status-dot" style="background:${ST[t.status].dot}"></span>${ST[t.status].label}</span><span class="tc-opened" id="tcOpened"></span></div>` +
+          `<div class="tc-nav-btn">QR Code</div></div>` +
+        (kind === 'done' ? `<div class="tc-body is-done"><div class="tc-done-img"></div><div class="tc-done-text">已出餐完畢且結清帳單</div><div class="tc-done-btn" data-act="tcClearAsk">清桌</div></div>` :
+        kind !== 'form' ? `<div class="tc-body is-order">${this.orderCard(t, kind === 'pending')}</div>` :
+        `<div class="tc-body">${this.cardFormHTML(false)}</div>`) +
+        `<div class="tc-footer"><div class="nav-btn nav-btn-secondary" data-act="tcSwap">換桌</div><div class="nav-btn nav-btn-primary">點餐</div></div>`) +
+        `<div class="slot" id="tcToast"></div>` +
+      `</div>`;
+    const fresh = host._html !== shell;
+    html(host, shell);
+    // 清桌確認 Alert（iOS 原生樣式，同取消候位）：有待確認訂單時多一行
+    html($('clearAlert'), !t || this.state.clearAsk !== t.id ? '' :
+      `<div class="ios-alert-scrim"><div class="ios-alert">` +
+        `<div class="ios-alert-body"><div class="ios-alert-title">確認清桌？</div>` +
+          `<div class="ios-alert-msg">確認${t.name}清桌？桌位將即時釋放${t.pending ? '\n該桌的 1 張待確認訂單將一併取消' : ''}</div></div>` +
+        `<div class="ios-alert-actions"><div class="ios-alert-btn" data-act="tcClearCancel">取消</div><div class="ios-alert-btn is-destructive" data-act="tcClearConfirm">確認清桌</div></div>` +
+      `</div></div>`);
+    if (!t) return;
+    if (fresh && kind === 'form') { const c = t.cust; $('tcName').value = c.name; $('tcPhone').value = c.phone; $('tcNote').value = c.note; }
+    // 提示列接在篩選列下方；桌卡在提示列下方 20px 起、距畫面底 60px；空桌桌卡高度依內容，在此範圍內垂直置中
+    const top = this.state.safeTopPx + CHROME_H, cardTop = top + 52 + 20, maxH = this.state.screenH - 60 - cardTop;
+    // 候位開桌：遮罩蓋住整個畫面（含提示列）
+    setStyle($('tcScrim'), { top: seatW ? '0px' : top + 'px' });
+    if (!seatW) setStyle($('tcHint'), { top: top + 'px' });
+    // 候位開桌：提示列被遮罩蓋住，視窗改在狀態列以下區域置中（上下至少 20px，同新增候位視窗）
+    const contentH = this.state.screenH - this.state.safeTopPx;
+    setStyle($('tcPanel'), seatW ? { top: this.state.safeTopPx + contentH / 2 + 'px', maxHeight: contentH - 40 + 'px' }
+      : kind === 'open' ? { top: cardTop + maxH / 2 + 'px', maxHeight: maxH + 'px' } : { top: cardTop + 'px', height: maxH + 'px' });
+    html($('tcToast'), this.state.cardToast ? `<div class="wla-toast">${typeof this.state.cardToast === 'string' ? this.state.cardToast : '已套用會員資料'}</div>` : '');
+    if (kind !== 'open') {
+      // 開桌時間＝現在時間－用餐分鐘數
+      const d = new Date(Date.now() - t.mins * 60000), pad = n => String(n).padStart(2, '0');
+      html($('tcOpened'), `${pad(d.getHours())}:${pad(d.getMinutes())} 開桌`);
+    }
+    if (!hasForm) return;
+    if (kind === 'open') {
+      const o = this.state.cardOpen;
+      $('tcPanel').classList.toggle('is-adv', o.adv);
+      Object.keys(o.toggles).forEach(k => $('tcToggle-' + k).classList.toggle('is-on', o.toggles[k]));
+      if (seatW) {
+        // 超過座位數提示（空桌與有人桌皆顯示）；有人桌另有本桌會員（可切換，同 R52 樣式）
+        const sum = (t.status === 'empty' ? 0 : t.guests ?? 0) + seatW.people;
+        html($('seatPick'), (t.status === 'empty' ? '' : memberSwap(this.seatChoices(t, seatW), o.member, 'seatMember')) +
+          (sum > t.cap ? `<div class="mv-warn">加入後 ${sum} 人，超過桌位容量</div>` : ''));
+        return;
+      }
+      $('tcExpand').classList.toggle('is-collapsed', !o.expanded);
+      if (!TC_GUEST_REQUIRED) {
+        $('tcExpandBtn').classList.toggle('is-open', o.expanded);
+        html($('tcExpandText'), o.expanded ? '收合顧客資料' : '填寫顧客資料');
+      }
+    }
+    const f = this.cardForm(), m = f.member;
+    // 套用會員後收合姓名、手機與「選擇會員」，展開會員卡片；清除時反向（清除時保留卡片內容，讓收合動畫期間仍看得到）
+    $('tcMemberSwap').classList.toggle('is-collapsed', !m);
+    $('tcManualSwap').classList.toggle('is-collapsed', !!m);
+    if (m) html($('tcMemberCard'),
+      `<div class="wla-member-card">` +
+        `<div class="wla-member-info" data-act="memInfoOpen" data-from="card">` +
+          `<div class="wla-member-name"><span>👤</span><span>${m.name}</span><span class="wla-member-badge">${m.level}</span></div>` +
+          `<div class="wla-member-phone">${m.phone}</div>` +
+        `</div>` +
+        `<div class="wla-member-actions"><div class="wla-member-btn" data-act="tcMember">更換</div><div class="wla-member-divider"></div><div class="wla-member-btn is-muted" data-act="tcUnlink">清除</div></div>` +
+      `</div>`);
+    html($('tcTitles'), WLA_TITLES.map(x =>
+      `<div class="wla-chip${f.title === x ? ' is-active' : ''}" data-act="tcTitle" data-t="${x}">${x}</div>`).join(''));
+    const err = kind === 'open' && this.state.cardOpen.error;
+    html($('tcGuests'), WLA_GUESTS.map(g =>
+      `<div class="wla-guest${g.required && err ? ' is-error' : ''}"><div class="wla-guest-inner">` +
+        `<div class="wla-guest-label">${g.label}${g.required ? `<span class="wla-required">必填</span>` : ''}${g.required && err ? `<span class="wla-error-text">請設定人數</span>` : ''}</div>` +
+        `<div class="wla-guest-count"><span>${f[g.k]}</span><div class="wla-stepper">` +
+          `<div class="wla-step" data-act="tcStep" data-k="${g.k}" data-d="-1">${ICON_MINUS}</div>` +
+          `<div class="wla-step" data-act="tcStep" data-k="${g.k}" data-d="1">${ICON_PLUS}</div>` +
+        `</div></div>` +
+      `</div></div>`).join(''));
+    const total = f.adults + f.kids + f.infants;
+    html($('tcTotal'), `${total}人`);
+    if ($('tcNeeds')) html($('tcNeeds'), this.needsHTML('tc', f.needs));
+    if (kind === 'open') html($('tcMin'), money(total * TC_MIN_PER_GUEST));
+  }
+
+  // 外框（含輸入框）只在開啟時建立，保留輸入內容；稱謂與來客數另外更新
+  renderWaitlistAdd() {
+    const a = this.state.wlAdd;
+    html($('wlAdd'), !a ? '' :
+      `<div class="wla-scrim"></div>` +
+      `<div class="wla-panel" id="wlaPanel">` +
+        // 編輯模式只換標題與右上按鈕；開啟時是否已有會員決定初始收合狀態（開啟當下不播動畫）
+        `<div class="wla-nav"><div class="wla-nav-btn" data-act="wlaCancel">取消</div><div class="wla-nav-title">${a.editNo ? '編輯候位' : '新增候位'}</div><div class="wla-nav-btn" data-act="wlaSubmit">${a.editNo ? '更新' : '加入'}</div></div>` +
+        `<div class="wla-body">` +
+          `<div class="wla-swap${a.startWithMember ? '' : ' is-collapsed'}" id="wlaMemberSwap"><div class="wla-swap-inner"><div class="wla-card wla-member" id="wlaMemberCard"></div></div></div>` +
+          `<div class="wla-swap${a.startWithMember ? ' is-collapsed' : ''}" id="wlaManualSwap"><div class="wla-swap-inner">` +
+          `<div class="wla-card wla-contact" id="wlaContact">` +
+            `<div class="wla-name-row">` +
+              `<label class="wla-field wla-field-name"><span class="wla-field-inner"><span class="wla-field-label">姓名</span><input class="wla-input" id="wlaName" type="text" placeholder="請輸入姓名"></span></label>` +
+              `<div class="wla-titles" id="wlaTitles"></div>` +
+            `</div>` +
+            `<label class="wla-field"><span class="wla-field-inner"><span class="wla-field-label">手機</span><input class="wla-input" id="wlaPhone" type="text" inputmode="tel" placeholder="請輸入手機號碼"></span></label>` +
+          `</div>` +
+          `<div class="wla-card wla-link" id="wlaLink" data-act="wlmOpen"><span>選擇會員</span>${ICON_CHEVRON}</div>` +
+          `</div></div>` +
+          `<div><div class="wla-subtitle">來客數</div><div class="wla-card wla-guests" id="wlaGuests"></div></div>` +
+          `<div><div class="wla-subtitle">特殊需求設定</div><div class="wla-card wla-tags" id="wlaNeeds"></div></div>` +
+          `<div><div class="wla-subtitle">備註</div><div class="wla-card wla-note-wrap"><textarea class="wla-note" id="wlaNote" placeholder="特殊需求、過敏、其他注意事項..."></textarea></div></div>` +
+        `</div>` +
+        `<div class="slot" id="wlaToast"></div>` +
+      `</div>`);
+    if (!a) return;
+    // 套用會員後收合姓名、手機與「選擇會員」，展開會員卡片；清除時反向（只收合不清空，清除後恢復原本輸入）
+    const m = a.member;
+    $('wlaMemberSwap').classList.toggle('is-collapsed', !m);
+    $('wlaManualSwap').classList.toggle('is-collapsed', !!m);
+    // 清除時保留卡片內容，讓收合動畫期間仍看得到
+    if (m) html($('wlaMemberCard'),
+      `<div class="wla-member-card">` +
+        `<div class="wla-member-info" data-act="memInfoOpen" data-from="wla">` +
+          `<div class="wla-member-name"><span>👤</span><span>${m.name}</span><span class="wla-member-badge">${m.level}</span></div>` +
+          `<div class="wla-member-phone">${m.phone}</div>` +
+        `</div>` +
+        `<div class="wla-member-actions"><div class="wla-member-btn" data-act="wlmOpen">更換</div><div class="wla-member-divider"></div><div class="wla-member-btn is-muted" data-act="wlaUnlink">清除</div></div>` +
+      `</div>`);
+    html($('wlaToast'), a.toast ? `<div class="wla-toast">${typeof a.toast === 'string' ? a.toast : '已套用會員資料'}</div>` : '');
+    // 編輯候位：視窗建立後帶入文字欄位（只做一次，之後保留使用者輸入）
+    if (this.wlaPrefill) {
+      const f = this.wlaPrefill; this.wlaPrefill = null;
+      $('wlaName').value = f.name; $('wlaPhone').value = f.phone; $('wlaNote').value = f.note;
+    }
+    // 狀態列以下的區域置中；畫面太矮時縮短高度（內容可捲動），上下至少留 20px
+    const contentH = this.state.screenH - this.state.safeTopPx, h = Math.min(620, contentH - 40);
+    setStyle($('wlaPanel'), { top: this.state.safeTopPx + (contentH - h) / 2 + 'px', height: h + 'px' });
+    html($('wlaNeeds'), this.needsHTML('wla', a.needs));
+    html($('wlaTitles'), WLA_TITLES.map(t =>
+      `<div class="wla-chip${a.title === t ? ' is-active' : ''}" data-act="wlaTitle" data-t="${t}">${t}</div>`).join(''));
+    html($('wlaGuests'), WLA_GUESTS.map(g =>
+      `<div class="wla-guest${g.required && a.error ? ' is-error' : ''}"><div class="wla-guest-inner">` +
+        `<div class="wla-guest-label">${g.label}${g.required ? `<span class="wla-required">必填</span>` : ''}${g.required && a.error ? `<span class="wla-error-text">請設定人數</span>` : ''}</div>` +
+        `<div class="wla-guest-count"><span>${a[g.k]}</span><div class="wla-stepper">` +
+          `<div class="wla-step" data-act="wlaStep" data-k="${g.k}" data-d="-1">${ICON_MINUS}</div>` +
+          `<div class="wla-step" data-act="wlaStep" data-k="${g.k}" data-d="1">${ICON_PLUS}</div>` +
+        `</div></div>` +
+      `</div></div>`).join(''));
+  }
+
+  // 外框只在開啟／關閉時重建（保留搜尋框焦點），清單內容隨搜尋更新
+  renderWaitlist() {
+    const wl = this.state.waitlist, cls = wl && wl.closing ? ' wl-closing' : '';
+    html($('waitlist'), !wl ? '' :
+      `<div class="wl-scrim${cls}" data-act="closeWaitlist"></div>` +
+      `<div class="wl-panel${cls}" style="right:${wl.right}px">` +
+        `<div class="wl-arrow"></div>` +
+        `<div class="wl-head"><div class="wl-head-spacer"></div><div class="wl-title">候位清單</div><div class="wl-text-btn" data-act="wlaOpen">新增</div></div>` +
+        `<div class="wl-search"><label class="wl-search-field">${ICON_SEARCH}` +
+          `<input class="wl-search-input" type="text" inputmode="numeric" placeholder="搜尋「候位流水號」或「電話後三碼」"></label></div>` +
+        `<div class="wl-list" id="wlList"></div>` +
+      `</div>`);
+    if (!wl) return;
+    const items = this.waitlistItems();
+    html($('wlList'), !items.length ? `<div class="wl-empty">找不到符合的候位</div>` : items.map(w =>
+      `<div class="wl-row" data-no="${w.no}">` +
+      `<div class="wl-actions">` +
+        `<div class="wl-action wl-action-edit" data-act="wlaEdit" data-no="${w.no}" role="button" aria-label="編輯">${ICON_SWIPE_EDIT}</div>` +
+        `<div class="wl-action wl-action-qr" role="button" aria-label="補印 QRcode">${ICON_SWIPE_PRINT}</div>` +
+        `<div class="wl-action wl-action-cancel" data-act="wlCancelAsk" data-no="${w.no}" role="button" aria-label="取消候位">${ICON_SWIPE_TRASH}</div>` +
+      `</div>` +
+      `<div class="wl-item">` +
+        `<div class="wl-num">${w.no}</div>` +
+        `<div class="wl-info">` +
+          `<div class="wl-name-row">${w.name ? `<span class="wl-name">${w.member ? '<span>👤</span>' : ''}<span>${w.name}</span></span>` : ''}<span>${w.people}人</span>${w.pending ? `<span class="wl-pending">待確認訂單</span>` : ''}</div>` +
+          (w.phone ? `<div class="wl-phone">${w.phone}</div>` : '') +
+          `<div class="wl-meta"><span>已等 ${w.mins} 分</span>` +
+            (w.ahead === 0 ? `<span class="wl-hl">下一組</span>` : `<span>前方還有 <span class="wl-hl">${w.ahead}</span> 組</span>`) +
+          `</div>` +
+        `</div>` +
+        `<div class="wl-text-btn" data-act="wlSeat" data-no="${w.no}">開桌</div>` +
+      `</div></div>`).join(''));
+    // 滑開狀態以 class 切換（不重建列），收合／展開才有動畫
+    document.querySelectorAll('.wl-row').forEach(r => r.classList.toggle('is-open', r.dataset.no === this.state.wlSwipe));
+    const c = this.state.wlCancel, cw = c && this.state.wlData.find(w => w.no === c.no);
+    html($('wlCancel'), !cw ? '' :
+      `<div class="ios-alert-scrim"><div class="ios-alert">` +
+        `<div class="ios-alert-body"><div class="ios-alert-title">取消候位</div>` +
+          `<div class="ios-alert-msg">確認取消 ${cw.no}的候位？${cw.pendingCount ? `\n該桌的 ${cw.pendingCount} 張待確認訂單將一併取消` : ''}</div></div>` +
+        `<div class="ios-alert-actions"><div class="ios-alert-btn" data-act="wlCancelClose">返回</div><div class="ios-alert-btn is-destructive" data-act="wlCancelConfirm">取消候位</div></div>` +
+      `</div></div>`);
+  }
+
+  // 座位圖顯示設定選單：第一層兩個入口，第二層為單選清單
+  renderSettings() {
+    const { settings: page, timerMode, headerFmt } = this.state;
+    const sub = (title, items, cur, act, gap) =>
+      `<div class="settings-head"><div class="settings-back" data-act="settingsPage" data-p="root">${ICON_MENU_BACK}</div>${title}</div>` +
+      (gap ? `<div class="settings-gap"></div>` : '') +
+      `<div>${items.map(o => `<div class="settings-row${cur === o.k ? ' is-active' : ''}" data-act="${act}" data-k="${o.k}">` +
+        `<div class="settings-check">${ICON_CHECK}</div><div class="settings-label">${o.label}</div></div>`).join('')}</div>`;
+    html($('settingsMenu'), !page ? '' :
+      `<div class="settings-menu"><div class="settings-arrow"></div><div class="settings-card${page === 'root' ? ' settings-root' : ''}">` +
+      (page === 'root' ?
+        `<div class="settings-head">座位圖顯示設定</div>` +
+        `<div>${[{ p: 'timer', label: '佔桌計時模式' }, { p: 'header', label: '訂單抬頭顯示格式' }].map(r =>
+          `<div class="settings-row" data-act="settingsPage" data-p="${r.p}"><div class="settings-check"></div>` +
+          `<div class="settings-label"><span class="settings-label-text">${r.label}</span>${ICON_MENU_NEXT}</div></div>`).join('')}</div>` :
+      page === 'timer' ? sub('佔桌計時模式', TIMER_MODES, timerMode, 'timerMode', false) :
+        sub('訂單抬頭顯示格式', HEADER_FORMATS, headerFmt, 'headerFmt', true)) +
+      `</div></div>`);
+  }
+
+  // 標籤下拉的勾選數量、右側符合桌數、標籤選單
+  renderTagFilter(total) {
+    const { tagMenu, tags } = this.state, btn = $('tagBtn');
+    html($('tagCount'), tags.length ? `<span class="dropdown-count">${tags.length}</span>` : '');
+    html($('filterTotal'), total);
+    html($('tagMenu'), !tagMenu ? '' :
+      `<div class="tag-menu" style="left:${btn.offsetLeft + 17}px;top:${btn.offsetTop + btn.offsetHeight + 6}px"><div class="settings-arrow"></div><div class="settings-card">` +
+        `<div class="settings-head">標籤</div><div class="settings-gap"></div>` +
+        `<div class="tag-list">${TAGS.map(g => `<div class="tag-chip${tags.includes(g) ? ' is-active' : ''}" data-act="tag" data-t="${g}">${tags.includes(g) ? `<span class="tag-chip-check">${ICON_CHECK}</span>` : ''}${g}</div>`).join('')}</div>` +
+      `</div></div>`);
+  }
+
+  // 座位數下拉文字與座位數選單（單選，同座位圖顯示設定選單的勾選列）
+  renderSeatFilter() {
+    const { seatMenu, seatFilter } = this.state, btn = $('seatBtn'), cur = SEAT_RANGES.find(r => r.k === seatFilter);
+    html($('seatLabel'), cur ? `座位數（${cur.label}）` : '座位數');
+    html($('seatMenu'), !seatMenu ? '' :
+      `<div class="seat-menu" style="left:${btn.offsetLeft + 44}px;top:${btn.offsetTop + btn.offsetHeight + 6}px"><div class="settings-arrow"></div><div class="settings-card">` +
+        `<div class="settings-head">座位數</div><div class="settings-gap"></div>` +
+        `<div>${SEAT_RANGES.map(r => `<div class="settings-row${seatFilter === r.k ? ' is-active' : ''}" data-act="seatPick" data-k="${r.k}">` +
+          `<div class="settings-check">${ICON_CHECK}</div><div class="settings-label">${r.label}</div></div>`).join('')}</div>` +
+      `</div></div>`);
+  }
+
+  // 桌位元素依索引沿用，讓 transform／陰影／透明度／底色的 transition 能正常播放
+  renderTables(items) {
+    const host = $('tables');
+    while (host.children.length > items.length) host.lastChild.remove();
+    while (host.children.length < items.length) { const el = document.createElement('div'); el.className = 'table'; host.appendChild(el); }
+    items.forEach((t, i) => {
+      const el = host.children[i];
+      el.dataset.i = i;
+      setStyle(el, {
+        left: t.left + 'px', top: t.top + 'px', width: t.size + 'px', height: t.size + 'px',
+        borderRadius: t.radius, background: t.bg, border: t.border, color: t.color,
+        opacity: String(t.opacity), transform: `scale(${t.scale})`, boxShadow: t.shadow,
+      });
+      el.classList.toggle('is-seat-target', t.seatTarget);
+      html(el,
+        (t.isEmpty ? tableDash(t.size, t.radius) : '') +
+        (t.isEmpty ? `<img class="table-plus" src="${ICON.plus}" width="32" height="32" alt="" draggable="false">` : '') +
+        `<div class="table-name">${t.name}</div>` +
+        (t.time && t.time.text ? `<div class="table-time">${ICON_CLOCK}${t.time.text}</div>` : '') +
+        `<div class="table-guests"><img class="table-guests-icon" src="${t.userIcon}" width="16" height="16" alt="" draggable="false">${t.guestsText}</div>` +
+        (t.pending ? `<div class="table-pending">待確認</div>` : '') +
+        (t.time && t.time.over ? `<div class="table-overtime">${ICON_ALARM}超 ${t.time.over} 分</div>` : '') +
+        (t.badge ? `<div class="table-badge">${t.badge}</div>` : ''));
+    });
+  }
+}
+
+new Component().componentDidMount();
+</script>
+</body></html>
