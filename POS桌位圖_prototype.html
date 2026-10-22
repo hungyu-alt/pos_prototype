@@ -724,8 +724,6 @@ a{color:var(--c-primary)}a:hover{color:var(--c-primary-dark)}
 .tc-opened{font-size:var(--fs-wla-body);line-height:20px;color:#000}
 .tc-body{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:60px 0 20px;display:flex;flex-direction:column;gap:12px}
 .tc-total{height:48px;padding:8px 12px 8px 16px;display:flex;align-items:center;justify-content:space-between;font-size:var(--fs-wla-body);line-height:24px;font-weight:500;color:#000}
-/* 空桌桌卡：合計與低消之間的分隔線（左側內縮 16px，同來客數各列） */
-.tc-total.has-divider{margin-left:16px;padding-left:0;border-bottom:1px solid var(--c-op-line)}
 .tc-total-val{font-weight:400;line-height:20px;color:var(--c-tc-value)}
 .tc-subtitle-wide{padding-left:20px}
 .tc-tags{padding:12px 20px}
@@ -1007,8 +1005,6 @@ const TC_OPEN_TOGGLES = [
 ];
 const TC_OPEN_FEES = ['服務費百分比（%）', '折扣比率', '折扣金額'];
 const TC_OPEN_DEFAULT = () => ({ expanded: TC_GUEST_REQUIRED, adv: false, title: '不稱謂', adults: 1, kids: 0, infants: 0, member: null, needs: [], toggles: { selfGuests: true, allowUnderMin: true, needConfirm: true, paidNoConfirm: true, singleUse: false } });
-// 低消：依來客數每人 $300（依 Figma 進階設定）
-const TC_MIN_PER_GUEST = 300;
 // Figma 匯出的 icon/arrow_down（#0092B1；收合時旋轉 180°）
 const ICON_ARROW_DOWN = 'data:image/svg+xml;base64,PHN2ZyBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJub25lIiBvdmVyZmxvdz0idmlzaWJsZSIgc3R5bGU9ImRpc3BsYXk6IGJsb2NrOyIgd2lkdGg9IjIwIiBoZWlnaHQ9IjIwIiB2aWV3Qm94PSIwIDAgMjAgMjAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxnIGlkPSJpY29uL2Fycm93X2Rvd24iPgo8cGF0aCBpZD0iVW5pb24iIGQ9Ik00LjYyNSA4Ljc5NDU1TDUuMzMxNjUgOC4wODc5MUwxMC4xNDAxIDEyLjg5NjNMMTQuOTUwMiA4LjA4NjE4TDE1LjY1NjkgOC43OTI4M0wxMC4xNDAxIDE0LjMwOTZMNC42MjUgOC43OTQ1NVoiIGZpbGw9IiMwMDkyQjEiLz4KPC9nPgo8L3N2Zz4K';
 // 候位左滑操作按鈕圖示（依 Figma icon/edit、icon/printer、icon/trash）
@@ -2253,11 +2249,10 @@ class Component {
     `</div>`;
   }
 
-  // 桌卡來客數（佔桌、空桌共用）：大人／小孩／嬰兒、合計；空桌多「低消」
-  cardGuestsHTML(isOpen) {
+  // 桌卡來客數（佔桌、空桌共用）：大人／小孩／嬰兒、合計
+  cardGuestsHTML() {
     return `<div><div class="wla-subtitle">來客數</div><div class="wla-card wla-guests"><div id="tcGuests"></div>` +
-        `<div class="tc-total${isOpen ? ' has-divider' : ''}"><span>合計</span><span class="tc-total-val" id="tcTotal"></span></div>` +
-        (isOpen ? `<div class="tc-total"><span>低消</span><span class="tc-total-val" id="tcMin"></span></div>` : '') +
+        `<div class="tc-total"><span>合計</span><span class="tc-total-val" id="tcTotal"></span></div>` +
       `</div></div>`;
   }
 
@@ -2265,7 +2260,7 @@ class Component {
   // 特殊需求只有從候位開桌的佔桌才有（R29、R57；空桌桌卡、一般開桌的佔桌不顯示）
   cardFormHTML(isOpen) {
     const startM = !isOpen && this.cardStartMember, t = !isOpen && this.cardTable(), needs = t && t.cust && t.cust.fromWl;
-    return (isOpen ? '' : this.cardGuestsHTML(false)) +
+    return (isOpen ? '' : this.cardGuestsHTML()) +
       `<div class="wla-swap${startM ? '' : ' is-collapsed'}" id="tcMemberSwap"><div class="wla-swap-inner"><div class="wla-card wla-member" id="tcMemberCard"></div></div></div>` +
       `<div class="wla-swap${startM ? ' is-collapsed' : ''}" id="tcManualSwap"><div class="wla-swap-inner">` +
         `<div class="wla-card wla-contact">` +
@@ -2273,7 +2268,7 @@ class Component {
             `<label class="wla-field wla-field-name"><span class="wla-field-inner"><span class="wla-field-label">姓名</span><input class="wla-input" id="tcName" type="text" placeholder="請輸入姓名"></span></label>` +
             `<div class="wla-titles" id="tcTitles"></div>` +
           `</div>` +
-          `<label class="wla-field"><span class="wla-field-inner"><span class="wla-field-label">手機</span><input class="wla-input" id="tcPhone" type="text" inputmode="tel" placeholder="請輸入電話號碼"></span></label>` +
+          `<label class="wla-field"><span class="wla-field-inner"><span class="wla-field-label">電話</span><input class="wla-input" id="tcPhone" type="text" inputmode="tel" placeholder="請輸入電話號碼"></span></label>` +
         `</div>` +
         `<div class="wla-card wla-link" data-act="tcMember"><span>選擇會員</span>${ICON_CHEVRON}</div>` +
       `</div></div>` +
@@ -2289,7 +2284,7 @@ class Component {
   }
 
   // 空桌桌卡（一般掃碼點餐）：主畫面（收合／展開顧客資料）與進階設定兩頁都先建立，以 class 切換
-  // 候位開桌（w 為候位資料）：頂部列只有標題（點遮罩關閉）；內容為候位、來客數、桌位、低消、掃碼點餐，不顯示顧客資料；
+  // 候位開桌（w 為候位資料）：頂部列只有標題（點遮罩關閉）；內容為候位、來客數、桌位、掃碼點餐，不顯示顧客資料；
   // 有待確認訂單時按鈕上方提示移轉
   openCardHTML(t, w) {
     const row = (label, val, act) => `<div class="tc-row"${act ? ` data-act="${act}"` : ''}><span>${label}</span><span class="tc-row-val">${val}</span></div>`;
@@ -2303,13 +2298,12 @@ class Component {
       (w ? `<div class="tc-body is-main">` +
         `<div class="wla-card tc-rows">${row('候位', `${w.no} ${w.name}`.trim())}${row('來客數', guestText)}${row('桌位', `${t.shape === 'circle' ? '圓桌' : '方桌'}, ${t.cap}人桌`)}</div>` +
         `<div class="slot" id="seatPick"></div>` +
-        `<div class="wla-card tc-rows">${row('低消', money(w.people * TC_MIN_PER_GUEST))}</div>` +
-        `<div><div class="wla-subtitle">掃碼點餐</div><div class="wla-card tc-rows">${row('連結有效時間', '無限制')}${row('進階設定', `6項${ICON_CHEVRON}`, 'tcAdv')}</div></div>` +
+        `<div><div class="wla-subtitle">掃碼點餐</div><div class="wla-card tc-rows">${row('連結有效時間', '無限制')}${row('進階設定', ICON_CHEVRON, 'tcAdv')}</div></div>` +
         (w.pendingCount ? `<div class="tc-seat-notice">${ICON_INFO}待確認訂單將移轉至桌位</div>` : '') +
       `</div>` :
       `<div class="tc-body is-main">` +
-        this.cardGuestsHTML(true) +
-        `<div class="wla-card tc-rows">${row('連結有效時間', '無限制')}${row('進階設定', `6項${ICON_CHEVRON}`, 'tcAdv')}</div>` +
+        this.cardGuestsHTML() +
+        `<div class="wla-card tc-rows">${row('連結有效時間', '無限制')}${row('進階設定', ICON_CHEVRON, 'tcAdv')}</div>` +
         `<div class="wla-swap${TC_GUEST_REQUIRED ? '' : ' is-collapsed'}" id="tcExpand"><div class="wla-swap-inner">${this.cardFormHTML(true)}</div></div>` +
         (TC_GUEST_REQUIRED ? '' : `<div class="tc-expand-btn" id="tcExpandBtn" data-act="tcExpand"><span id="tcExpandText"></span><img src="${ICON_ARROW_DOWN}" width="20" height="20" alt=""></div>`) +
       `</div>`) +
@@ -2414,7 +2408,6 @@ class Component {
     const total = f.adults + f.kids + f.infants;
     html($('tcTotal'), `${total}人`);
     if ($('tcNeeds')) html($('tcNeeds'), this.needsHTML('tc', f.needs));
-    if (kind === 'open') html($('tcMin'), money(total * TC_MIN_PER_GUEST));
   }
 
   // 外框（含輸入框）只在開啟時建立，保留輸入內容；稱謂與來客數另外更新
@@ -2433,7 +2426,7 @@ class Component {
               `<label class="wla-field wla-field-name"><span class="wla-field-inner"><span class="wla-field-label">姓名</span><input class="wla-input" id="wlaName" type="text" placeholder="請輸入姓名"></span></label>` +
               `<div class="wla-titles" id="wlaTitles"></div>` +
             `</div>` +
-            `<label class="wla-field"><span class="wla-field-inner"><span class="wla-field-label">手機</span><input class="wla-input" id="wlaPhone" type="text" inputmode="tel" placeholder="請輸入電話號碼"></span></label>` +
+            `<label class="wla-field"><span class="wla-field-inner"><span class="wla-field-label">電話</span><input class="wla-input" id="wlaPhone" type="text" inputmode="tel" placeholder="請輸入電話號碼"></span></label>` +
           `</div>` +
           `<div class="wla-card wla-link" id="wlaLink" data-act="wlmOpen"><span>選擇會員</span>${ICON_CHEVRON}</div>` +
           `</div></div>` +
