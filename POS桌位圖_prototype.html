@@ -1974,17 +1974,17 @@ class Component {
     } else if (m.step === 'cap') {
       const sum = (from.guests ?? 1) + (to.guests ?? 0);
       inner = nav('加入有人桌', true) +
-        `<div class="mv-body"><div class="wla-card tc-rows">${row('來源桌', tableDesc(from))}${row('來客數', `成人 ${from.guests ?? 1}人`)}${row('目標桌來客數', (to.guests ?? '-') + '人')}</div>` +
+        `<div class="mv-body"><div class="wla-card tc-rows">${row('來源桌', tableDesc(from))}${row('移入人數', `成人 ${from.guests ?? 1}人`)}${row('目標桌人數', (to.guests ?? '-') + '人')}</div>` +
           memberPick(this.capChoices(from, to)) +
-          (sum > to.cap ? `<div class="mv-warn">加入後 ${sum} 人，超過桌位容量</div>` : '') + `</div>` +
+          (sum > to.cap ? `<div class="mv-warn">加入後 ${sum} 人，超過座位數</div>` : '') + `</div>` +
         submit('確認加入', 'mvCapConfirm');
     } else {
       const picked = from.list.filter(o => m.sel.includes(o.no));
       const members = this.moveChoices(picked, to, from), total = m.adults + m.kids + m.infants;
       inner = nav('加入有人桌', true) +
-        `<div class="mv-body"><div class="wla-card tc-rows">${row('來源桌', tableDesc(from))}${row('目標桌', tableDesc(to))}</div>` +
+        `<div class="mv-body"><div class="wla-card tc-rows">${row('來源桌', tableDesc(from))}${row('目標桌人數', (to.guests ?? '-') + '人')}</div>` +
           memberPick(members) +
-          `<div><div class="wla-subtitle">來客數</div><div class="wla-card wla-guests">` + WLA_GUESTS.map(g =>
+          `<div><div class="wla-subtitle">移入人數</div><div class="wla-card wla-guests">` + WLA_GUESTS.map(g =>
             `<div class="wla-guest"><div class="wla-guest-inner">` +
               `<div class="wla-guest-label">${g.label}${g.required ? `<span class="wla-required">必填</span>` : ''}</div>` +
               `<div class="wla-guest-count"><span>${m[g.k]}</span><div class="wla-stepper">` +
@@ -1994,7 +1994,7 @@ class Component {
             `</div></div>`).join('') +
             `<div class="tc-total"><span>合計</span><span class="tc-total-val">${total}人</span></div>` +
           `</div></div>` +
-          ((to.guests ?? 0) + total > to.cap ? `<div class="mv-warn">加入後 ${(to.guests ?? 0) + total} 人，超過桌位容量</div>` : '') +
+          ((to.guests ?? 0) + total > to.cap ? `<div class="mv-warn">加入後 ${(to.guests ?? 0) + total} 人，超過座位數</div>` : '') +
         `</div>` +
         submit('確認加入', 'mvPartialConfirm');
     }
@@ -2373,7 +2373,7 @@ class Component {
         // 超過座位數提示（空桌與有人桌皆顯示）；有人桌另有本桌會員（可切換，同 R52 樣式）
         const sum = (t.status === 'empty' ? 0 : t.guests ?? 0) + seatW.people;
         html($('seatPick'), (t.status === 'empty' ? '' : memberSwap(this.seatChoices(t, seatW), o.member, 'seatMember')) +
-          (sum > t.cap ? `<div class="mv-warn">加入後 ${sum} 人，超過桌位容量</div>` : ''));
+          (sum > t.cap ? `<div class="mv-warn">加入後 ${sum} 人，超過座位數</div>` : ''));
         return;
       }
       $('tcExpand').classList.toggle('is-collapsed', !o.expanded);
