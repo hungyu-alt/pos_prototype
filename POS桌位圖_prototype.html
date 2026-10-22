@@ -53,7 +53,7 @@
   --c-overtime-bg:#D92D20;
   --c-overtime-fg:#fff;
 
-  /* 座位圖顯示設定選單（依 Figma「佔桌計時模式」） */
+  /* 桌位圖顯示設定選單（依 Figma「佔桌計時模式」） */
   --c-menu-bg:#F2F2F7;
   --c-menu-head:var(--c-op-primary);
   --c-menu-on-head:#fff;
@@ -411,7 +411,7 @@ a{color:var(--c-primary)}a:hover{color:var(--c-primary-dark)}
 .popover-cap{font-size:14px;color:var(--c-text-tertiary)}
 .popover-open{height:40px;border-radius:10px;background:var(--c-primary);color:var(--c-white);font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;cursor:pointer}
 
-/* 座位圖顯示設定選單：三角形尖端對準設定圖示下方，位置依 Figma（三角形頂端距導覽列頂 45px） */
+/* 桌位圖顯示設定選單：三角形尖端對準設定圖示下方，位置依 Figma（三角形頂端距導覽列頂 45px） */
 .settings-btn{cursor:pointer}
 /* 候位選桌模式鎖定（R48）：不提供「桌號未定」「候位」按鈕（保留位置，候位清單仍依「候位」按鈕定位），設定圖示不可點 */
 .screen.is-seat-lock .nav-actions{visibility:hidden}
@@ -437,7 +437,7 @@ a{color:var(--c-primary)}a:hover{color:var(--c-primary-dark)}
 .settings-root .settings-label-text{flex:1;align-self:stretch;display:flex;align-items:center;border-bottom:1px solid var(--c-menu-line)}
 .settings-chevron{display:block;flex-shrink:0;margin-left:4px}
 
-/* 標籤選單：外觀同座位圖顯示設定選單；位置依「標籤」下拉計算（選單左緣＝下拉左緣 +17px、三角形尖端＝下拉左緣 +41px、三角形頂端距下拉底 6px，依 Figma） */
+/* 標籤選單：外觀同桌位圖顯示設定選單；位置依「標籤」下拉計算（選單左緣＝下拉左緣 +17px、三角形尖端＝下拉左緣 +41px、三角形頂端距下拉底 6px，依 Figma） */
 .tag-menu{position:absolute;width:263px;z-index:20;filter:drop-shadow(var(--sh-tag-menu))}
 .tag-menu .settings-arrow{left:12px}
 .tag-list{background:var(--c-menu-row);padding:12px;display:flex;flex-wrap:wrap;gap:12px}
@@ -445,7 +445,7 @@ a{color:var(--c-primary)}a:hover{color:var(--c-primary-dark)}
 .tag-chip.is-active{padding:2.5px 6.5px;background:var(--c-tag-chip-active-bg);border:var(--bd-tag-chip-active)}
 .tag-chip-check{width:16px;height:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--c-tag-chip-check)}
 .tag-chip-check svg{width:14px;height:auto}
-/* 座位數選單（R61）：外觀同座位圖顯示設定選單；選單左緣＝「座位數」下拉左緣 +44px、三角形頂端距下拉底 6px（依 Figma） */
+/* 座位數選單（R61）：外觀同桌位圖顯示設定選單；選單左緣＝「座位數」下拉左緣 +44px、三角形頂端距下拉底 6px（依 Figma） */
 .seat-menu{position:absolute;width:263px;z-index:20;filter:drop-shadow(var(--sh-menu))}
 .seat-menu .settings-arrow{left:12px}
 /* 特殊需求標籤池（R57）：外觀同標籤選單；三角形尖端對準「加入標籤」中央、頂端距按鈕底 6px；下方空間不足時改開在按鈕上方（三角形朝下） */
@@ -1030,7 +1030,7 @@ const SEAT_RANGES = [
 const fitsSeat = (t, k) => { const r = k && SEAT_RANGES.find(x => x.k === k); return !r || (t.cap >= r.min && t.cap <= r.max); };
 // 佔桌計時模式：用餐時限（假資料，分鐘）；剩餘時間＝時限－用餐分鐘數，超過時限顯示「超 N 分」
 const TABLE_TIME_LIMIT = 60;
-// 座位圖顯示設定選單（依 Figma「佔桌計時模式」）；訂單抬頭顯示格式目前只做顯示，不影響畫面
+// 桌位圖顯示設定選單（依 Figma「佔桌計時模式」）；訂單抬頭顯示格式目前只做顯示，不影響畫面
 const TIMER_MODES = [{ k: 'remain', label: '桌位剩餘使用時間' }, { k: 'used', label: '桌位已使用時間' }];
 const HEADER_FORMATS = [{ k: 'table', label: '桌號' }, { k: 'total', label: '訂單總價' }, { k: 'orderNo', label: '訂單編號' }];
 // 虛線平均分布：一圈長度不一定是「線段＋間隔」的整數倍，照抄間隔會在起點留下過窄的接縫；
@@ -1235,7 +1235,7 @@ class Component {
       this.cancelDrag();
     }, true);
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.state.drag) this.cancelDrag(); });
-    // 座位圖顯示設定選單：按在選單與設定圖示以外的地方即關閉（該次操作照常進行）
+    // 桌位圖顯示設定選單：按在選單與設定圖示以外的地方即關閉（該次操作照常進行）
     $('screen').addEventListener('pointerdown', e => {
       if (this.state.settings && !e.target.closest('.settings-menu, #settingsBtn')) this.setState({ settings: null });
       if (this.state.tagMenu && !e.target.closest('.tag-menu, #tagBtn')) this.setState({ tagMenu: false });
@@ -2518,7 +2518,7 @@ class Component {
       `</div></div>`);
   }
 
-  // 座位圖顯示設定選單：第一層兩個入口，第二層為單選清單
+  // 桌位圖顯示設定選單：第一層兩個入口，第二層為單選清單
   renderSettings() {
     const { settings: page, timerMode, headerFmt } = this.state;
     const sub = (title, items, cur, act, gap) =>
@@ -2529,7 +2529,7 @@ class Component {
     html($('settingsMenu'), !page ? '' :
       `<div class="settings-menu"><div class="settings-arrow"></div><div class="settings-card${page === 'root' ? ' settings-root' : ''}">` +
       (page === 'root' ?
-        `<div class="settings-head">座位圖顯示設定</div>` +
+        `<div class="settings-head">桌位圖顯示設定</div>` +
         `<div>${[{ p: 'timer', label: '佔桌計時模式' }, { p: 'header', label: '訂單抬頭顯示格式' }].map(r =>
           `<div class="settings-row" data-act="settingsPage" data-p="${r.p}"><div class="settings-check"></div>` +
           `<div class="settings-label"><span class="settings-label-text">${r.label}</span>${ICON_MENU_NEXT}</div></div>`).join('')}</div>` :
@@ -2550,7 +2550,7 @@ class Component {
       `</div></div>`);
   }
 
-  // 座位數下拉文字與座位數選單（單選，同座位圖顯示設定選單的勾選列）
+  // 座位數下拉文字與座位數選單（單選，同桌位圖顯示設定選單的勾選列）
   renderSeatFilter() {
     const { seatMenu, seatFilter } = this.state, btn = $('seatBtn'), cur = SEAT_RANGES.find(r => r.k === seatFilter);
     html($('seatLabel'), cur ? `座位數（${cur.label}）` : '座位數');
