@@ -120,6 +120,9 @@
   --op-mv-disabled:.4;
   /* 候位選桌模式鎖定：導覽列設定圖示不可點 */
   --op-nav-locked:.4;
+  /* 候位選桌模式鎖定：「候位」按鈕停用樣式（依 Figma 截圖估算） */
+  --c-nav-btn-disabled-bg:#E6E6E6;
+  --c-nav-btn-disabled-fg:#B2B2B2;
   /* 訂單卡的訂單板圖示（依 Figma） */
   --c-ghost-order-head:#B0DDE7;
   --c-ghost-order-clip:#003D4A;
@@ -413,8 +416,9 @@ a{color:var(--c-primary)}a:hover{color:var(--c-primary-dark)}
 
 /* 桌位圖顯示設定選單：三角形尖端對準設定圖示下方，位置依 Figma（三角形頂端距導覽列頂 45px） */
 .settings-btn{cursor:pointer}
-/* 候位選桌模式鎖定（R48）：不提供「桌號未定」「候位」按鈕（保留位置，候位清單仍依「候位」按鈕定位），設定圖示不可點 */
-.screen.is-seat-lock .nav-actions{visibility:hidden}
+/* 候位選桌模式鎖定（R48）：不提供「桌號未定」（保留位置）；「候位」為停用樣式（灰底灰字、徽章不變）、不可點；設定圖示不可點 */
+.screen.is-seat-lock .nav-actions .nav-btn-secondary{visibility:hidden}
+.screen.is-seat-lock #waitlistBtn{background:var(--c-nav-btn-disabled-bg);border-color:var(--c-nav-btn-disabled-bg);color:var(--c-nav-btn-disabled-fg);pointer-events:none}
 .screen.is-seat-lock .settings-btn{opacity:var(--op-nav-locked);pointer-events:none}
 /* 換桌選桌模式鎖定（R55）：「候位」按鈕外觀不變、點了沒反應 */
 .screen.is-swap-lock #waitlistBtn{pointer-events:none}
@@ -1927,7 +1931,7 @@ class Component {
       const to = this.tables().find(t => t.id === sl.to), w = this.seatEntry();
       return html($('leaveAlert'), `<div class="ios-alert-scrim"><div class="ios-alert">` +
         `<div class="ios-alert-body"><div class="ios-alert-title">加入${to.name}</div>` +
-          `<div class="ios-alert-msg">確定要將候位${w.no}號移動至${to.name}？\n${to.name}為待離桌狀態，換桌後會清除桌狀態</div></div>` +
+          `<div class="ios-alert-msg">確定要將候位 ${w.no} 移動至${to.name}？\n${to.name}為待離桌狀態，換桌後會清除桌狀態</div></div>` +
         `<div class="ios-alert-actions"><div class="ios-alert-btn" data-act="seatLeaveCancel">取消</div><div class="ios-alert-btn is-destructive" data-act="seatLeaveConfirm">清桌後加入</div></div>` +
       `</div></div>`);
     }
@@ -1967,8 +1971,8 @@ class Component {
           `</div></div>`).join('') +
         `</div></div>` +
         `<div class="mv-footer">` +
-          // 部分訂單移到空桌：目標桌沒有 QR Code，提示需要時再新建
-          ((to.status === 'empty') && m.sel.length && m.sel.length < this.units(from) ? `<div class="tc-seat-notice mv-notice">${ICON_INFO}移桌後如需掃碼點餐，請至桌位詳情頁新建 QR Code</div>` : '') +
+          // 部分勾選（不論目標桌況）：提示移桌後如需掃碼點餐要新建 QR Code
+          (m.sel.length && m.sel.length < this.units(from) ? `<div class="tc-seat-notice mv-notice">${ICON_INFO}移桌後如需掃碼點餐，請至桌位詳情頁新建 QR Code</div>` : '') +
           `<div class="mv-btns"><div class="nav-btn nav-btn-secondary" data-act="mvCancel">取消</div><div class="nav-btn nav-btn-primary${blocked ? ' is-disabled' : ''}" data-act="mvPick">換桌</div></div>` +
         `</div>`;
     } else if (m.step === 'cap') {
@@ -2269,7 +2273,7 @@ class Component {
             `<label class="wla-field wla-field-name"><span class="wla-field-inner"><span class="wla-field-label">姓名</span><input class="wla-input" id="tcName" type="text" placeholder="請輸入姓名"></span></label>` +
             `<div class="wla-titles" id="tcTitles"></div>` +
           `</div>` +
-          `<label class="wla-field"><span class="wla-field-inner"><span class="wla-field-label">手機</span><input class="wla-input" id="tcPhone" type="text" inputmode="tel" placeholder="請輸入手機號碼"></span></label>` +
+          `<label class="wla-field"><span class="wla-field-inner"><span class="wla-field-label">手機</span><input class="wla-input" id="tcPhone" type="text" inputmode="tel" placeholder="請輸入電話號碼"></span></label>` +
         `</div>` +
         `<div class="wla-card wla-link" data-act="tcMember"><span>選擇會員</span>${ICON_CHEVRON}</div>` +
       `</div></div>` +
@@ -2429,7 +2433,7 @@ class Component {
               `<label class="wla-field wla-field-name"><span class="wla-field-inner"><span class="wla-field-label">姓名</span><input class="wla-input" id="wlaName" type="text" placeholder="請輸入姓名"></span></label>` +
               `<div class="wla-titles" id="wlaTitles"></div>` +
             `</div>` +
-            `<label class="wla-field"><span class="wla-field-inner"><span class="wla-field-label">手機</span><input class="wla-input" id="wlaPhone" type="text" inputmode="tel" placeholder="請輸入手機號碼"></span></label>` +
+            `<label class="wla-field"><span class="wla-field-inner"><span class="wla-field-label">手機</span><input class="wla-input" id="wlaPhone" type="text" inputmode="tel" placeholder="請輸入電話號碼"></span></label>` +
           `</div>` +
           `<div class="wla-card wla-link" id="wlaLink" data-act="wlmOpen"><span>選擇會員</span>${ICON_CHEVRON}</div>` +
           `</div></div>` +
@@ -2513,7 +2517,7 @@ class Component {
     html($('wlCancel'), !cw ? '' :
       `<div class="ios-alert-scrim"><div class="ios-alert">` +
         `<div class="ios-alert-body"><div class="ios-alert-title">取消候位</div>` +
-          `<div class="ios-alert-msg">確認取消 ${cw.no}的候位？${cw.pendingCount ? `\n該桌的 ${cw.pendingCount} 張待確認訂單將一併取消` : ''}</div></div>` +
+          `<div class="ios-alert-msg">確認取消 ${cw.no} 的候位？${cw.pendingCount ? `\n該桌的 ${cw.pendingCount} 張待確認訂單將一併取消` : ''}</div></div>` +
         `<div class="ios-alert-actions"><div class="ios-alert-btn" data-act="wlCancelClose">返回</div><div class="ios-alert-btn is-destructive" data-act="wlCancelConfirm">取消候位</div></div>` +
       `</div></div>`);
   }
